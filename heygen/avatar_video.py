@@ -27,6 +27,8 @@ INITIAL_POLL_SECONDS = 5.0
 MAX_POLL_SECONDS = 15.0
 
 ASPECT_RATIOS = ["auto", "16:9", "9:16", "4:5", "5:4", "1:1"]
+# HeyGen also accepts "4k", but only for Avatar III video avatars — not for raw image input.
+RESOLUTIONS = ["1080p", "720p"]
 EXPRESSIVENESS_LEVELS = ["low", "medium", "high"]
 
 _EXTENSION_BY_MIME = {
@@ -105,6 +107,16 @@ class HeyGenAvatarVideo(SuccessFailureNode):
                 tooltip="Output aspect ratio. 'auto' follows the input image.",
                 allowed_modes={ParameterMode.PROPERTY},
                 traits={Options(choices=ASPECT_RATIOS)},
+            )
+        )
+        self.add_parameter(
+            Parameter(
+                name="resolution",
+                type="str",
+                default_value="1080p",
+                tooltip="Output video resolution.",
+                allowed_modes={ParameterMode.PROPERTY},
+                traits={Options(choices=RESOLUTIONS)},
             )
         )
         self.add_parameter(
@@ -345,6 +357,7 @@ class HeyGenAvatarVideo(SuccessFailureNode):
             "image": {"type": "asset_id", "asset_id": image_asset_id},
             "audio_asset_id": audio_asset_id,
             "expressiveness": self.parameter_values.get("expressiveness") or "low",
+            "resolution": self.parameter_values.get("resolution") or "1080p",
         }
         aspect_ratio = self.parameter_values.get("aspect_ratio") or "auto"
         if aspect_ratio != "auto":

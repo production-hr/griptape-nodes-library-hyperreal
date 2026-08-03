@@ -32,6 +32,7 @@ Image + audio → English lipsync video, using HeyGen's **Avatar IV** engine (th
 | `audio` | AudioArtifact / AudioUrlArtifact | mp3 or wav, up to 32 MB |
 | `video_title` | str | Optional; shown in the HeyGen dashboard |
 | `aspect_ratio` | auto / 16:9 / 9:16 / 4:5 / 5:4 / 1:1 | `auto` follows the input image |
+| `resolution` | 1080p / 720p | Default `1080p` (4k is Avatar III-only, not available for image input) |
 | `motion_prompt` | str | Optional natural-language gesture direction |
 | `expressiveness` | low / medium / high | Default `low` |
 | `output_directory` | str | Optional folder to also save the video into (supports `{project_dir}/...`) |
