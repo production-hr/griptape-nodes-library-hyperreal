@@ -1,0 +1,63 @@
+{
+    "name": "HeyGen",
+    "library_schema_version": "0.5.0",
+    "settings": [
+        {
+            "description": "API key required by nodes in this library",
+            "category": "app_events.on_app_initialization_complete",
+            "contents": {
+                "secrets_to_register": [
+                    "HEYGEN_API_KEY"
+                ]
+            }
+        }
+    ],
+    "metadata": {
+        "author": "HyperReal",
+        "description": "HeyGen nodes for Griptape Nodes: avatar lipsync video generation (Avatar IV) and video translation.",
+        "library_version": "0.1.0",
+        "engine_version": "0.73.0",
+        "tags": [
+            "HeyGen",
+            "Video",
+            "AI",
+            "Lipsync",
+            "Translation"
+        ],
+        "dependencies": {
+            "pip_dependencies": [
+                "requests"
+            ]
+        }
+    },
+    "categories": [
+        {
+            "video/heygen": {
+                "color": "border-red-500",
+                "title": "HeyGen",
+                "description": "Video generation and translation nodes using the HeyGen API",
+                "icon": "Video"
+            }
+        }
+    ],
+    "nodes": [
+        {
+            "class_name": "HeyGenAvatarVideo",
+            "file_path": "avatar_video.py",
+            "metadata": {
+                "category": "video/heygen",
+                "description": "Generate a lipsync avatar video from an image and an audio file using HeyGen's Avatar IV engine.",
+                "display_name": "HeyGen Avatar Video"
+            }
+        },
+        {
+            "class_name": "HeyGenVideoTranslate",
+            "file_path": "video_translate.py",
+            "metadata": {
+                "category": "video/heygen",
+                "description": "Translate a video into one or more languages with lip-sync and voice preservation via HeyGen.",
+                "display_name": "HeyGen Video Translate"
+            }
+        }
+    ]
+}

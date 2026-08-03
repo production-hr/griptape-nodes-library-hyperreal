@@ -1,11 +1,11 @@
 [project]
-name = "example_nodes_template"
+name = "griptape-nodes-library-heygen"
 version = "0.1.0"
-description = "Template for Users to create Custom Libraries and Nodes"
-authors = [{ name = "Your Name", email = "you@example.com" }]
+description = "HeyGen avatar video generation and video translation nodes for Griptape Nodes"
+authors = [{ name = "HyperReal", email = "tim.coleman.3d@gmail.com" }]
 readme = "README.md"
 requires-python = "~=3.12.0"
-dependencies = ["griptape-nodes-engine"]
+dependencies = ["griptape-nodes-engine", "requests"]
 
 [tool.uv.sources]
 griptape-nodes-engine = { git = "https://github.com/griptape-ai/griptape-nodes-engine", rev = "latest" }
@@ -13,6 +13,9 @@ griptape-nodes-engine = { git = "https://github.com/griptape-ai/griptape-nodes-e
 [build-system]
 requires = ["hatchling"]
 build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["heygen"]
 
 [dependency-groups]
 dev = ["pyright>=1.1.396", "pytest-asyncio>=0.21.0", "ruff>=0.8.0", "pytest"]
