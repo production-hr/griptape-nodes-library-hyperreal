@@ -1,10 +1,21 @@
-# HeyGen Nodes for Griptape Nodes
+# HyperReal Nodes for Griptape Nodes
 
-HeyGen video nodes for [Griptape Nodes](https://www.griptapenodes.com/): generate lipsync avatar videos from an image + audio (Avatar IV), and translate videos into other languages with lip-sync and voice preservation.
+HyperReal's custom node library for [Griptape Nodes](https://www.griptapenodes.com/) — one library, one install, with all our service integrations organized as categories:
 
-[![Add to Griptape Nodes](https://img.shields.io/badge/Add%20to-Griptape%20Nodes-blue)](https://nodes.griptape.ai/#library-management?git=https://github.com/production-hr/griptape-nodes-library-heygen)
+```
+HYPERREAL NODES
+├─ VIDEO
+│  └─ HEYGEN            HeyGen Avatar Video · HeyGen Video Translate
+├─ STORAGE (planned)
+│  └─ SPACES            Upload to Spaces — see SPEC.md
+└─ VIEWCOMFY (planned)
+```
 
-**Install link:** <https://nodes.griptape.ai/#library-management?git=https://github.com/production-hr/griptape-nodes-library-heygen>
+Current contents: **HeyGen** nodes — generate lipsync avatar videos from an image + audio (Avatar IV), and translate videos into other languages with lip-sync and voice preservation.
+
+[![Add to Griptape Nodes](https://img.shields.io/badge/Add%20to-Griptape%20Nodes-blue)](https://nodes.griptape.ai/#library-management?git=https://github.com/production-hr/griptape-nodes-library-hyperreal)
+
+**Install link:** <https://nodes.griptape.ai/#library-management?git=https://github.com/production-hr/griptape-nodes-library-hyperreal>
 
 ## Target pipeline
 
@@ -18,9 +29,9 @@ Verified end to end in production on 2026-08-03.
 
 ## Setup
 
-1. **Install the library** with the link above, or manually: Settings → Libraries → *+ Add Library* → path to `heygen/griptape_nodes_library.json` in your clone of this repo (absolute paths work; the repo does not need to live in your workspace directory).
+1. **Install the library** with the link above, or manually: Settings → Libraries → *+ Add Library* → path to `hyperreal/griptape_nodes_library.json` in your clone of this repo (absolute paths work; the repo does not need to live in your workspace directory).
 2. **Set your API key**: Settings → API Keys & Secrets → `HEYGEN_API_KEY` (get one from the [HeyGen dashboard](https://app.heygen.com/settings?nav=API)), then **restart the engine** — see Gotchas.
-3. Refresh Libraries. Both nodes appear under the **HeyGen** category.
+3. Refresh Libraries. The nodes appear under **HyperReal Nodes → Video → HeyGen**.
 
 Requires engine version 0.86.0+ (the nodes use `SuccessFailureNode` and the project/macro path system).
 
@@ -90,7 +101,7 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 
 ## Implementation notes
 
-- **Manifest**: `heygen/griptape_nodes_library.json` — underscored filename in a subdirectory named after the library, matching the official Minimax/Kling convention and current docs (the template's root-level hyphenated name is the older style). Node `file_path` entries are resolved relative to the manifest. `HEYGEN_API_KEY` is declared via `settings[].contents.secrets_to_register`.
+- **Manifest**: `hyperreal/griptape_nodes_library.json` — underscored filename in a subdirectory named after the library, matching the official Minimax/Kling convention and current docs (the template's root-level hyphenated name is the older style). Node `file_path` entries are resolved relative to the manifest and grouped per service (`heygen/avatar_video.py`, later `dospaces/...`). `HEYGEN_API_KEY` is declared via `settings[].contents.secrets_to_register`.
 - **Self-contained node files, no shared client module**: every official library (Minimax, Kling, ElevenLabs) duplicates its HTTP helpers per node file because the engine loads each node file individually — cross-file imports between library files are unproven in this ecosystem. The ~80 duplicated lines are the deliberate trade.
 - **Media input handling**: artifact values arrive in many forms depending on where they came from — raw bytes, `http(s)://` URLs, `data:` URIs, workspace-relative paths, and `{project_dir}/...` macro paths (project-based workflows). The nodes resolve all of them; macros go through the engine's `ParsedMacro` + `GetPathForMacroRequest` API (lazy-imported so the library still loads on older engines).
 - **Output persistence**: results are downloaded and saved via `StaticFilesManager` (durable localhost URLs), optionally also written to `output_directory`.
@@ -119,7 +130,7 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 
 ```bash
 uv sync
-uv run ruff check heygen
+uv run ruff check hyperreal
 ```
 
-Library manifest: [heygen/griptape_nodes_library.json](heygen/griptape_nodes_library.json). The companion DigitalOcean Spaces library is specified in [SPEC.md](SPEC.md).
+Library manifest: [hyperreal/griptape_nodes_library.json](hyperreal/griptape_nodes_library.json). The next additions (DigitalOcean Spaces nodes) are specified in [SPEC.md](SPEC.md).

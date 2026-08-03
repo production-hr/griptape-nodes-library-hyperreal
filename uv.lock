@@ -471,7 +471,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "griptape-nodes-library-heygen"
+name = "griptape-nodes-library-hyperreal"
 version = "0.1.0"
 source = { editable = "." }
 dependencies = [

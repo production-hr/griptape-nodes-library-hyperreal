@@ -1,5 +1,5 @@
 {
-    "name": "HeyGen",
+    "name": "HyperReal Nodes",
     "library_schema_version": "0.5.0",
     "settings": [
         {
@@ -14,10 +14,11 @@
     ],
     "metadata": {
         "author": "HyperReal",
-        "description": "HeyGen nodes for Griptape Nodes: avatar lipsync video generation (Avatar IV) and video translation.",
+        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, with DigitalOcean Spaces and ViewComfy nodes to follow.",
         "library_version": "0.1.0",
         "engine_version": "0.86.0",
         "tags": [
+            "HyperReal",
             "HeyGen",
             "Video",
             "AI",
@@ -43,7 +44,7 @@
     "nodes": [
         {
             "class_name": "HeyGenAvatarVideo",
-            "file_path": "avatar_video.py",
+            "file_path": "heygen/avatar_video.py",
             "metadata": {
                 "category": "video/heygen",
                 "description": "Generate a lipsync avatar video from an image and an audio file using HeyGen's Avatar IV engine.",
@@ -52,7 +53,7 @@
         },
         {
             "class_name": "HeyGenVideoTranslate",
-            "file_path": "video_translate.py",
+            "file_path": "heygen/video_translate.py",
             "metadata": {
                 "category": "video/heygen",
                 "description": "Translate a video into one or more languages with lip-sync and voice preservation via HeyGen.",
