@@ -89,6 +89,17 @@ class HeyGenVideoTranslate(SuccessFailureNode):
         )
         self.add_parameter(
             Parameter(
+                name="output_directory",
+                input_types=["str"],
+                type="str",
+                default_value="",
+                tooltip="Optional folder to also save the translated videos into, e.g. {project_dir}/outputs. "
+                "Leave empty to skip saving file copies.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            )
+        )
+        self.add_parameter(
+            Parameter(
                 name="videos",
                 output_type="list[VideoUrlArtifact]",
                 tooltip="Translated videos, in the same order as the successful target languages.",
@@ -127,6 +138,7 @@ class HeyGenVideoTranslate(SuccessFailureNode):
         yield lambda: self._process()
 
     def _process(self) -> None:
+        self._saved_files: list[str] = []
         try:
             api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_NAME)
             if not api_key:
@@ -150,6 +162,9 @@ class HeyGenVideoTranslate(SuccessFailureNode):
 
             detail_lines = [f"{lang}: OK" for lang in succeeded]
             detail_lines += [f"{lang}: FAILED - {results[lang].get('error', 'unknown error')}" for lang in failed]
+            if self._saved_files:
+                detail_lines.append("Saved files:")
+                detail_lines.extend(self._saved_files)
             details = "\n".join(detail_lines)
 
             if not succeeded:
@@ -392,4 +407,46 @@ class HeyGenVideoTranslate(SuccessFailureNode):
         except Exception:
             logger.warning("Could not save %s to static files; using the presigned URL", filename, exc_info=True)
             saved_url = video_url
+        self._save_copy_to_output_directory(response.content, safe_language)
         return VideoUrlArtifact(value=saved_url, name=filename)
+
+    def _save_copy_to_output_directory(self, data: bytes, safe_language: str) -> None:
+        """Optionally write the video into the user-chosen folder; failures are reported, not fatal."""
+        directory = (self.parameter_values.get("output_directory") or "").strip()
+        if not directory:
+            return
+        try:
+            dir_path = self._resolve_directory(directory)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            title = re.sub(r"[^A-Za-z0-9_-]+", "_", (self.parameter_values.get("title") or "").strip()).strip("_")
+            base = f"{title}_{safe_language}" if title else f"heygen_translate_{safe_language}"
+            target = dir_path / f"{base}.mp4"
+            counter = 1
+            while target.exists():
+                target = dir_path / f"{base}_{counter}.mp4"
+                counter += 1
+            target.write_bytes(data)
+            self._saved_files.append(str(target))
+        except Exception as e:
+            logger.warning("Could not save translated video to %r", directory, exc_info=True)
+            self._saved_files.append(f"FAILED to save into {directory}: {e}")
+
+    def _resolve_directory(self, value: str) -> Path:
+        if "{" in value:
+            from griptape_nodes.common.macro_parser import ParsedMacro
+            from griptape_nodes.retained_mode.events.project_events import (
+                GetPathForMacroRequest,
+                GetPathForMacroResultSuccess,
+            )
+
+            result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=ParsedMacro(value), variables={}))
+            if isinstance(result, GetPathForMacroResultSuccess):
+                return Path(result.absolute_path)
+            raise ValueError(f"Could not resolve output directory macro {value!r}.")
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        try:
+            return Path(GriptapeNodes.ConfigManager().workspace_path) / path
+        except Exception:
+            return path

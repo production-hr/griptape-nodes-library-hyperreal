@@ -34,6 +34,7 @@ Image + audio → English lipsync video, using HeyGen's **Avatar IV** engine (th
 | `aspect_ratio` | auto / 16:9 / 9:16 / 4:5 / 5:4 / 1:1 | `auto` follows the input image |
 | `motion_prompt` | str | Optional natural-language gesture direction |
 | `expressiveness` | low / medium / high | Default `low` |
+| `output_directory` | str | Optional folder to also save the video into (supports `{project_dir}/...`) |
 
 Outputs: `video` (VideoUrlArtifact, saved to the project's static files), `video_id` (str), plus `was_successful` / `result_details` and **Succeeded** / **Failed** control paths.
 
@@ -49,6 +50,7 @@ Video → one or more translated videos with lip-sync and the original voice pre
 | `target_languages` | list of str | HeyGen language names, e.g. `Spanish (Spain)`, `Catalan (Spain)` |
 | `title` | str | Optional |
 | `mode` | speed / precision | `precision` gives higher lip-sync quality |
+| `output_directory` | str | Optional folder to also save all translated videos into (supports `{project_dir}/...`); files are named `<title>_<language>.mp4` |
 
 Outputs: `videos` (list of VideoUrlArtifact, in target-language order), `language_map` (language → URL), plus status outputs as above.
 

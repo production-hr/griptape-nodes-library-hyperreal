@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import logging
+import re
 import time
 import uuid
 from pathlib import Path
@@ -129,6 +130,17 @@ class HeyGenAvatarVideo(SuccessFailureNode):
         )
         self.add_parameter(
             Parameter(
+                name="output_directory",
+                input_types=["str"],
+                type="str",
+                default_value="",
+                tooltip="Optional folder to also save the generated video into, e.g. {project_dir}/outputs. "
+                "Leave empty to skip saving a file copy.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            )
+        )
+        self.add_parameter(
+            Parameter(
                 name="video",
                 output_type="VideoUrlArtifact",
                 tooltip="The generated lipsync video.",
@@ -168,6 +180,7 @@ class HeyGenAvatarVideo(SuccessFailureNode):
 
     def _process(self) -> None:
         started = time.monotonic()
+        self._saved_files: list[str] = []
         try:
             api_key = GriptapeNodes.SecretsManager().get_secret(API_KEY_NAME)
             if not api_key:
@@ -194,9 +207,10 @@ class HeyGenAvatarVideo(SuccessFailureNode):
             elapsed = int(time.monotonic() - started)
             duration = detail.get("duration")
             duration_note = f", duration {duration:.1f}s" if isinstance(duration, (int, float)) else ""
+            saved_note = "\nSaved files:\n" + "\n".join(self._saved_files) if self._saved_files else ""
             self._set_status_results(
                 was_successful=True,
-                result_details=f"Video {video_id} generated in {elapsed}s{duration_note}.",
+                result_details=f"Video {video_id} generated in {elapsed}s{duration_note}.{saved_note}",
             )
         except Exception as e:
             self._set_status_results(was_successful=False, result_details=str(e))
@@ -389,4 +403,46 @@ class HeyGenAvatarVideo(SuccessFailureNode):
         except Exception:
             logger.warning("Could not save %s to static files; using the presigned URL", filename, exc_info=True)
             saved_url = video_url
+        self._save_copy_to_output_directory(response.content, video_id)
         return VideoUrlArtifact(value=saved_url, name=filename)
+
+    def _save_copy_to_output_directory(self, data: bytes, video_id: str) -> None:
+        """Optionally write the video into the user-chosen folder; failures are reported, not fatal."""
+        directory = (self.parameter_values.get("output_directory") or "").strip()
+        if not directory:
+            return
+        try:
+            dir_path = self._resolve_directory(directory)
+            dir_path.mkdir(parents=True, exist_ok=True)
+            title = re.sub(r"[^A-Za-z0-9_-]+", "_", (self.parameter_values.get("video_title") or "").strip()).strip("_")
+            base = title if title else f"heygen_{video_id[:8]}"
+            target = dir_path / f"{base}.mp4"
+            counter = 1
+            while target.exists():
+                target = dir_path / f"{base}_{counter}.mp4"
+                counter += 1
+            target.write_bytes(data)
+            self._saved_files.append(str(target))
+        except Exception as e:
+            logger.warning("Could not save generated video to %r", directory, exc_info=True)
+            self._saved_files.append(f"FAILED to save into {directory}: {e}")
+
+    def _resolve_directory(self, value: str) -> Path:
+        if "{" in value:
+            from griptape_nodes.common.macro_parser import ParsedMacro
+            from griptape_nodes.retained_mode.events.project_events import (
+                GetPathForMacroRequest,
+                GetPathForMacroResultSuccess,
+            )
+
+            result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=ParsedMacro(value), variables={}))
+            if isinstance(result, GetPathForMacroResultSuccess):
+                return Path(result.absolute_path)
+            raise ValueError(f"Could not resolve output directory macro {value!r}.")
+        path = Path(value)
+        if path.is_absolute():
+            return path
+        try:
+            return Path(GriptapeNodes.ConfigManager().workspace_path) / path
+        except Exception:
+            return path
