@@ -282,6 +282,9 @@ class HeyGenVideoTranslate(SuccessFailureNode):
         return {"type": "asset_id", "asset_id": asset_id}
 
     def _resolve_workspace_path(self, value: str) -> Path | None:
+        """Resolve non-URL artifact values: '{project_dir}/...' macros, workspace-relative, or absolute paths."""
+        if "{" in value:
+            return self._resolve_macro_path(value)
         path = Path(value)
         if path.is_absolute():
             return path if path.is_file() else None
@@ -291,6 +294,27 @@ class HeyGenVideoTranslate(SuccessFailureNode):
             return None
         candidate = Path(workspace) / path
         return candidate if candidate.is_file() else None
+
+    def _resolve_macro_path(self, value: str) -> Path | None:
+        # Lazy import: the project/macro system only exists on newer engines,
+        # and the library must still load without it.
+        try:
+            from griptape_nodes.common.macro_parser import ParsedMacro
+            from griptape_nodes.retained_mode.events.project_events import (
+                GetPathForMacroRequest,
+                GetPathForMacroResultSuccess,
+            )
+
+            result = GriptapeNodes.handle_request(GetPathForMacroRequest(parsed_macro=ParsedMacro(value), variables={}))
+        except Exception:
+            logger.warning("Could not resolve macro path %r", value, exc_info=True)
+            return None
+        if isinstance(result, GetPathForMacroResultSuccess):
+            path = Path(result.absolute_path)
+            if path.is_file():
+                return path
+        logger.warning("Macro path %r did not resolve to an existing file", value)
+        return None
 
     def _submit_translations(self, api_key: str, video_ref: dict[str, str], languages: list[str]) -> dict[str, str]:
         body: dict[str, Any] = {
