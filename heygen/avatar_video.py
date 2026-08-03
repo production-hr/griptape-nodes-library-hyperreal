@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import base64
 import logging
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 
 import requests
@@ -252,12 +254,32 @@ class HeyGenAvatarVideo(SuccessFailureNode):
         value = getattr(artifact, "value", artifact)
         if isinstance(value, bytes):
             return value
-        if isinstance(value, str) and value.startswith(("http://", "https://")):
-            response = requests.get(value, timeout=DOWNLOAD_TIMEOUT_SECONDS)
-            if not response.ok:
-                raise RuntimeError(f"Could not download {label} from {value} (HTTP {response.status_code}).")
-            return response.content
-        raise ValueError(f"Unsupported {label} input of type {type(artifact).__name__}.")
+        if isinstance(value, str) and value:
+            if value.startswith("data:"):
+                _, _, encoded = value.partition(",")
+                return base64.b64decode(encoded)
+            if value.startswith(("http://", "https://")):
+                response = requests.get(value, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+                if not response.ok:
+                    raise RuntimeError(f"Could not download {label} from {value} (HTTP {response.status_code}).")
+                return response.content
+            path = self._resolve_workspace_path(value)
+            if path is not None:
+                return path.read_bytes()
+        preview = repr(value)[:120]
+        raise ValueError(f"Unsupported {label} input of type {type(artifact).__name__} (value: {preview}).")
+
+    def _resolve_workspace_path(self, value: str) -> Path | None:
+        """Saved workflows store static files as workspace-relative paths rather than URLs."""
+        path = Path(value)
+        if path.is_absolute():
+            return path if path.is_file() else None
+        try:
+            workspace = GriptapeNodes.ConfigManager().workspace_path
+        except Exception:
+            return None
+        candidate = Path(workspace) / path
+        return candidate if candidate.is_file() else None
 
     def _upload_asset(self, api_key: str, data: bytes, fallback_mime: str, label: str) -> str:
         if len(data) > MAX_UPLOAD_BYTES:

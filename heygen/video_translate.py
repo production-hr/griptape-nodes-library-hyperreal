@@ -5,6 +5,7 @@ import logging
 import re
 import time
 import uuid
+from pathlib import Path
 from typing import Any
 from urllib.parse import urlparse
 
@@ -238,22 +239,30 @@ class HeyGenVideoTranslate(SuccessFailureNode):
             raise ValueError(" ".join(problems))
 
     def _resolve_video_reference(self, api_key: str) -> dict[str, str]:
-        """HeyGen must be able to fetch the source video, so local URLs are re-uploaded as assets."""
+        """HeyGen must be able to fetch the source video, so local sources are re-uploaded as assets."""
         artifact = self.parameter_values.get("video")
         if artifact is None:
             raise ValueError("No video input connected.")
-        url = getattr(artifact, "value", artifact)
-        if not isinstance(url, str) or not url.startswith(("http://", "https://")):
-            raise ValueError(f"Unsupported video input of type {type(artifact).__name__}; expected a video URL.")
+        value = getattr(artifact, "value", artifact)
 
-        host = (urlparse(url).hostname or "").lower()
-        if host not in LOCAL_HOSTS:
-            return {"type": "url", "url": url}
-
-        response = requests.get(url, timeout=DOWNLOAD_TIMEOUT_SECONDS)
-        if not response.ok:
-            raise RuntimeError(f"Could not read the local video at {url} (HTTP {response.status_code}).")
-        data = response.content
+        if isinstance(value, bytes):
+            data = value
+        elif isinstance(value, str) and value.startswith(("http://", "https://")):
+            host = (urlparse(value).hostname or "").lower()
+            if host not in LOCAL_HOSTS:
+                return {"type": "url", "url": value}
+            response = requests.get(value, timeout=DOWNLOAD_TIMEOUT_SECONDS)
+            if not response.ok:
+                raise RuntimeError(f"Could not read the local video at {value} (HTTP {response.status_code}).")
+            data = response.content
+        elif isinstance(value, str) and value:
+            # Saved workflows store static files as workspace-relative paths rather than URLs.
+            path = self._resolve_workspace_path(value)
+            if path is None:
+                raise ValueError(f"Unsupported video input of type {type(artifact).__name__} (value: {value[:120]!r}).")
+            data = path.read_bytes()
+        else:
+            raise ValueError(f"Unsupported video input of type {type(artifact).__name__}.")
         if len(data) > MAX_UPLOAD_BYTES:
             raise ValueError(
                 f"The source video is {len(data) / (1024 * 1024):.1f} MB, over HeyGen's 32 MB upload limit. "
@@ -271,6 +280,17 @@ class HeyGenVideoTranslate(SuccessFailureNode):
         if not asset_id:
             raise RuntimeError(f"HeyGen video upload returned no asset_id: {upload.text[:300]}")
         return {"type": "asset_id", "asset_id": asset_id}
+
+    def _resolve_workspace_path(self, value: str) -> Path | None:
+        path = Path(value)
+        if path.is_absolute():
+            return path if path.is_file() else None
+        try:
+            workspace = GriptapeNodes.ConfigManager().workspace_path
+        except Exception:
+            return None
+        candidate = Path(workspace) / path
+        return candidate if candidate.is_file() else None
 
     def _submit_translations(self, api_key: str, video_ref: dict[str, str], languages: list[str]) -> dict[str, str]:
         body: dict[str, Any] = {
