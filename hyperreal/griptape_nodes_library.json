@@ -7,15 +7,21 @@
             "category": "app_events.on_app_initialization_complete",
             "contents": {
                 "secrets_to_register": [
-                    "HEYGEN_API_KEY"
+                    "HEYGEN_API_KEY",
+                    "TOPAZ_API_KEY",
+                    "WAVESPEED_API_KEY",
+                    "DO_SPACES_KEY",
+                    "DO_SPACES_SECRET",
+                    "DO_SPACES_REGION",
+                    "DO_SPACES_ENDPOINT"
                 ]
             }
         }
     ],
     "metadata": {
         "author": "HyperReal",
-        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, with DigitalOcean Spaces and ViewComfy nodes to follow.",
-        "library_version": "0.1.0",
+        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
+        "library_version": "0.3.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -27,7 +33,8 @@
         ],
         "dependencies": {
             "pip_dependencies": [
-                "requests"
+                "requests",
+                "boto3"
             ]
         }
     },
@@ -38,6 +45,38 @@
                 "title": "HeyGen",
                 "description": "Video generation and translation nodes using the HeyGen API",
                 "icon": "Video"
+            }
+        },
+        {
+            "video/topaz": {
+                "color": "border-purple-500",
+                "title": "Topaz",
+                "description": "Video enhancement and upscaling nodes using the Topaz Labs API",
+                "icon": "Video"
+            }
+        },
+        {
+            "video/wavespeed": {
+                "color": "border-emerald-500",
+                "title": "WaveSpeed",
+                "description": "InfiniteTalk talking-video nodes using the WaveSpeed AI API",
+                "icon": "Video"
+            }
+        },
+        {
+            "image/wavespeed": {
+                "color": "border-emerald-500",
+                "title": "WaveSpeed",
+                "description": "Image editing nodes (Nano Banana, GPT Image) using the WaveSpeed AI API",
+                "icon": "Image"
+            }
+        },
+        {
+            "storage/spaces": {
+                "color": "border-blue-500",
+                "title": "Spaces",
+                "description": "DigitalOcean Spaces storage utilities",
+                "icon": "Cloud"
             }
         }
     ],
@@ -58,6 +97,51 @@
                 "category": "video/heygen",
                 "description": "Translate a video into one or more languages with lip-sync and voice preservation via HeyGen.",
                 "display_name": "HeyGen Video Translate"
+            }
+        },
+        {
+            "class_name": "TopazVideoUpscale",
+            "file_path": "topaz/video_upscale.py",
+            "metadata": {
+                "category": "video/topaz",
+                "description": "Upscale and/or retime a video with Topaz Labs (Proteus, Iris, Artemis, Nyx; Chronos/Apollo frame interpolation).",
+                "display_name": "Topaz Video Upscale"
+            }
+        },
+        {
+            "class_name": "WaveSpeedImageEdit",
+            "file_path": "wavespeed/image_edit.py",
+            "metadata": {
+                "category": "image/wavespeed",
+                "description": "Edit an image from a prompt + reference images (Nano Banana 2/Pro, GPT Image 2) via WaveSpeed.",
+                "display_name": "WaveSpeed Image Edit"
+            }
+        },
+        {
+            "class_name": "WaveSpeedInfiniteTalk",
+            "file_path": "wavespeed/infinitetalk.py",
+            "metadata": {
+                "category": "video/wavespeed",
+                "description": "Generate a talking video from an image and an audio file via WaveSpeed InfiniteTalk.",
+                "display_name": "WaveSpeed InfiniteTalk"
+            }
+        },
+        {
+            "class_name": "WaveSpeedInfiniteTalkV2V",
+            "file_path": "wavespeed/infinitetalk_v2v.py",
+            "metadata": {
+                "category": "video/wavespeed",
+                "description": "Relipsync an existing video to a new audio track via WaveSpeed InfiniteTalk video-to-video.",
+                "display_name": "WaveSpeed InfiniteTalk V2V"
+            }
+        },
+        {
+            "class_name": "UploadToSpaces",
+            "file_path": "dospaces/upload_to_spaces.py",
+            "metadata": {
+                "category": "storage/spaces",
+                "description": "Upload a media artifact to a DigitalOcean Spaces bucket and return its public URL.",
+                "display_name": "Upload to Spaces"
             }
         }
     ]
