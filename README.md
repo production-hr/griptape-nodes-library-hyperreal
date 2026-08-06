@@ -7,7 +7,8 @@ HYPERREAL NODES
 ├─ VIDEO
 │  ├─ HEYGEN            HeyGen Avatar Video · HeyGen Video Translate
 │  ├─ TOPAZ             Topaz Video Upscale
-│  └─ WAVESPEED         WaveSpeed InfiniteTalk · WaveSpeed InfiniteTalk V2V
+│  ├─ WAVESPEED         WaveSpeed InfiniteTalk · WaveSpeed InfiniteTalk V2V
+│  └─ FACE PREP         Detect Head Region · Crop To Region · Composite Region Back
 ├─ IMAGE
 │  └─ WAVESPEED         WaveSpeed Image Edit
 ├─ STORAGE
@@ -130,6 +131,36 @@ Outputs: `image` (ImageUrlArtifact), `prediction_id`.
 
 Outputs: `video` (InfiniteTalk) / `output_video` (V2V), `prediction_id`.
 
+### Face Prep nodes (`DetectHeadRegion`, `CropToRegion`, `CompositeRegionBack`)
+
+Three local-processing nodes (OpenCV + ffmpeg — **no API, no secrets**) that bracket an external face-swap step. The point is resolution: swap against a 512–1024 px head crop instead of a head that occupies 15% of a 1080p frame.
+
+```
+Load Video → Detect Head Region → Crop To Region → Topaz Video Upscale → [external face swap] → Composite Region Back → Save Video
+```
+
+**The `region` contract** (`hyperreal.head_region/1`, param type `json`) is what makes crop/paste-back invertible — emitted by Detect, passed through Crop, consumed by Composite:
+
+```json
+{
+  "schema": "hyperreal.head_region/1",
+  "source":   { "width": 1920, "height": 1080, "frame_rate": 25.0, "frame_count": 250 },
+  "box":      { "x": 704, "y": 96, "width": 512, "height": 512, "confidence": 0.94 },
+  "mode":     "static",
+  "offsets":  [[704, 96], [705, 96], "..."],
+  "detector": "yunet-2023mar",
+  "notes":    { "drift_px": 12, "detection_interval": 5, "frames_missed": 0, "clamped": false }
+}
+```
+
+`box` uses the ecosystem's face-detection key names so stock nodes can consume it; `offsets` is per-frame top-left origins (length == `frame_count`); box **size never varies within a clip** — only position — so the crop is a pure pixel copy and paste-back needs no inverse scaling.
+
+- **Detect Head Region** — YuNet face detector (vendored MIT-licensed ONNX at `hyperreal/faceprep/models/`, nothing downloads at run time) sampled every `detection_interval` frames; face box → head box via `pad_top`/`pad_bottom`/`pad_sides` (or `head_scale` when pads are all 0), squared, snapped up to `snap_multiple` (64). `box_mode` auto/static/tracked — auto picks static when measured drift is negligible. Subject followed by nearest centroid after the first confidence-ranked pick, so two-person shots don't swap subjects mid-clip. Outputs: `region`, flat `x`/`y`/`width`/`height` (wire into stock Crop Video if you prefer), and `preview_video` with the box drawn on — eyeball it to catch a bad detection. Missing faces in some sampled frames → interpolated with a warning; no faces at all → readable failure.
+- **Crop To Region** — static mode is a single ffmpeg `crop` pass; tracked mode streams frames through a rawvideo pipe and slices with numpy at each frame's offset. CRF 12 (near-lossless swap intermediate), `yuv420p`/`yuv444p`. `audio_source`: `plate` (default — copies the plate's audio, falling back to a **silent track** when the plate has none, because face-swap tools often require an audio track to be present) / `silent` / `none`. Outputs `head_video` + `region_out` (pass-through).
+- **Composite Region Back** — **validates before working**: insert frame count ≠ region's → fail naming both counts; fps or plate-dimension mismatch → fail. Lanczos-downscales the insert to box size, blends with an erode-then-feather procedural matte (`ellipse`/`rounded_rect`) or an optional `mask_video` matte (e.g. from a SAM video node), optional per-frame LAB `color_match`, remuxes the plate's audio. Output `composited_video`.
+
+First run of any of these downloads the ffmpeg binaries once (via `static-ffmpeg`).
+
 ### Upload to Spaces (`UploadToSpaces`)
 
 Media artifact → object in a DigitalOcean Spaces bucket, returning its public URL. Spaces is S3-compatible, so the node uses `boto3` with a custom `endpoint_url` — no DO-specific SDK.
@@ -184,6 +215,7 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - **Language identifiers are display names, verified live**: `"Catalan"` (plain — the region-suffixed `"Catalan (Spain)"` form appears in HeyGen's help pages, but the live check accepted and returned plain `"Catalan"`) and `"Spanish (Spain)"`. The node's submit-time validation against `GET /v3/video-translations/languages` catches wrong spellings with suggestions.
 - **API credits are a separate pool from subscription credits.** A funded HeyGen subscription still yields `MOVIO_PAYMENT_INSUFFICIENT_CREDIT` until API credits are purchased for the key's account. Higher resolution consumes credits faster.
 - **32 MB upload cap** on `/v3/assets` applies to the image, the audio, and any locally-hosted source video the translate node has to re-upload.
+- **Never enable Topaz `frame_interpolation` on a head crop that will be composited back.** Composite Region Back requires the insert's frame count to exactly match the region's — interpolation changes it, and the node will (correctly) refuse. Upscale only.
 - **WaveSpeed's upload API returns `data.download_url`, not the documented `data.url`.** Discovered live 2026-08-05; the nodes accept both, but keep it in mind when writing new WaveSpeed nodes.
 - **Auto-versioned save filenames use `{_index?:03}`, not `{###}`.** In Save-node `output_file` templates, the engine's version counter is the `_index` macro variable (`?` = optional so the first save resolves, `:03` = zero-pad). Save situations with the CREATE_NEW collision policy (e.g. `save_node_output`) already append it automatically on collision.
 - **`DO_SPACES_ENDPOINT` is the *region* endpoint, not the bucket URL.** Use `https://atl1.digitaloceanspaces.com`, not `https://<bucket>.atl1.digitaloceanspaces.com` (the URL the DO control panel shows most prominently). With the bucket URL, boto3 appends the bucket name as a path — the upload still "works" but lands under a stray top-level folder named after the bucket, and the node's output URL doubles the bucket (`https://<bucket>.<bucket>.atl1...`). Verified live 2026-08-04.
@@ -213,6 +245,16 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - [ ] Image edit verified on `google/nano-banana-pro/edit` and `openai/gpt-image-2/edit`
 - [ ] InfiniteTalk produces a talking video from image + audio; V2V from video + audio (if V2V 404s, re-check the model path — one WaveSpeed docs page spells it `infinietalk`)
 - [ ] Bad key produces a readable error
+
+## Verification — Face Prep nodes (round-trip machinery verified offline 2026-08-05; live checklist pending)
+
+- [x] Synthetic round trip (tracked Crop → Composite, no swap): 30/30 frames, output matches the plate inside the box; frame-count-mismatched insert fails naming both counts *(offline harness)*
+- [ ] All three nodes appear under **HyperReal Nodes → Video → Face Prep**; existing 7 nodes still load; **no engine restart needed** (no new secrets)
+- [ ] Locked-off talking-head clip: Detect picks `static`, preview box contains hair and chin, Crop produces a square clip
+- [ ] Moving-head clip: Detect picks `tracked`, cropped clip shows a stable head against a sliding background
+- [ ] Two-person plate: `subject_index` selects the intended face without swapping subjects mid-clip
+- [ ] Full chain with Topaz 2× in the middle produces a correctly-placed, correctly-scaled head
+- [ ] Seam invisible at `feather_px=24` on a real plate
 
 ## Verification — Upload to Spaces (video path confirmed live 2026-08-04)
 

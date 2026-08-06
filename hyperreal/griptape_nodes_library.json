@@ -20,8 +20,8 @@
     ],
     "metadata": {
         "author": "HyperReal",
-        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.3.0",
+        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
+        "library_version": "0.4.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -34,7 +34,10 @@
         "dependencies": {
             "pip_dependencies": [
                 "requests",
-                "boto3"
+                "boto3",
+                "opencv-python",
+                "numpy",
+                "static-ffmpeg>=2.8"
             ]
         }
     },
@@ -69,6 +72,14 @@
                 "title": "WaveSpeed",
                 "description": "Image editing nodes (Nano Banana, GPT Image) using the WaveSpeed AI API",
                 "icon": "Image"
+            }
+        },
+        {
+            "video/faceprep": {
+                "color": "border-amber-500",
+                "title": "Face Prep",
+                "description": "Head detection, crop, and paste-back nodes bracketing an external face-swap step",
+                "icon": "Video"
             }
         },
         {
@@ -133,6 +144,33 @@
                 "category": "video/wavespeed",
                 "description": "Relipsync an existing video to a new audio track via WaveSpeed InfiniteTalk video-to-video.",
                 "display_name": "WaveSpeed InfiniteTalk V2V"
+            }
+        },
+        {
+            "class_name": "DetectHeadRegion",
+            "file_path": "faceprep/detect_head_region.py",
+            "metadata": {
+                "category": "video/faceprep",
+                "description": "Detect the head in a video and emit a square crop region for face-swap prep.",
+                "display_name": "Detect Head Region"
+            }
+        },
+        {
+            "class_name": "CropToRegion",
+            "file_path": "faceprep/crop_to_region.py",
+            "metadata": {
+                "category": "video/faceprep",
+                "description": "Crop the detected head region out of a video as a square clip (swap intermediate).",
+                "display_name": "Crop To Region"
+            }
+        },
+        {
+            "class_name": "CompositeRegionBack",
+            "file_path": "faceprep/composite_region_back.py",
+            "metadata": {
+                "category": "video/faceprep",
+                "description": "Composite the swapped head region back onto the original plate video.",
+                "display_name": "Composite Region Back"
             }
         },
         {
