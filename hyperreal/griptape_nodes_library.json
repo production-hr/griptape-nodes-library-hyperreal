@@ -21,7 +21,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.5.0",
+        "library_version": "0.6.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -64,6 +64,14 @@
                 "title": "WaveSpeed",
                 "description": "InfiniteTalk talking-video nodes using the WaveSpeed AI API",
                 "icon": "Video"
+            }
+        },
+        {
+            "image/faceprep": {
+                "color": "border-amber-500",
+                "title": "Face Prep",
+                "description": "Image-domain head framing for face-swap and zoomed lipsync passes",
+                "icon": "Image"
             }
         },
         {
@@ -179,6 +187,24 @@
                 "category": "video/faceprep",
                 "description": "Composite the swapped head region back onto the original plate video.",
                 "display_name": "Composite Region Back"
+            }
+        },
+        {
+            "class_name": "ZoomToHead",
+            "file_path": "faceprep/zoom_to_head.py",
+            "metadata": {
+                "category": "image/faceprep",
+                "description": "Crop a head-and-shoulders zoom from a full-body image, for a higher-quality lipsync pass.",
+                "display_name": "Zoom To Head"
+            }
+        },
+        {
+            "class_name": "OverlayZoomedVideo",
+            "file_path": "composite/overlay_zoomed_video.py",
+            "metadata": {
+                "category": "video/composite",
+                "description": "Overlay a zoomed-in lipsync video over the full-body version, auto-aligned by face.",
+                "display_name": "Overlay Zoomed Video"
             }
         },
         {

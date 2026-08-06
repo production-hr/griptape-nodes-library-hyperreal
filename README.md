@@ -9,8 +9,9 @@ HYPERREAL NODES
 │  ├─ TOPAZ             Topaz Video Upscale
 │  ├─ WAVESPEED         WaveSpeed InfiniteTalk · WaveSpeed InfiniteTalk V2V
 │  └─ FACE PREP         Detect Head Region · Crop To Region · Composite Region Back
-│  └─ COMPOSITE         Composite Over Background
+│  └─ COMPOSITE         Composite Over Background · Overlay Zoomed Video
 ├─ IMAGE
+│  ├─ FACE PREP         Zoom To Head
 │  └─ WAVESPEED         WaveSpeed Image Edit
 ├─ STORAGE
 │  └─ SPACES            Upload to Spaces
@@ -162,6 +163,35 @@ Load Video → Detect Head Region → Crop To Region → Topaz Video Upscale →
 
 First run of any of these downloads the ffmpeg binaries once (via `static-ffmpeg`).
 
+### Zoom To Head + Overlay Zoomed Video — the two-pass lipsync trick
+
+Lipsyncing a full-body frame gives a small, soft face. These two nodes run the same audio through a second lipsync pass on a head-and-shoulders crop, then blend that better face back over the wide shot:
+
+```
+Full-body image ─┬─────────────────────► Lipsync (full body) ──┐
+                 │                                              ├─► Overlay Zoomed Video ─► Save
+                 └─► Zoom To Head ─► Lipsync (zoomed face) ─────┘
+Voiceover ───────────────► both lipsync passes (same audio = same length)
+```
+
+**Zoom To Head** (`image/faceprep`) crops the head-and-shoulders framing out of the full-body image, replacing a manual trip through Resolve. Detects the face with YuNet, then pads by `pad_top` / `pad_bottom` / `pad_sides` (fractions of face size, same idea as Detect Head Region). `aspect_ratio` defaults to `source` so the zoomed render comes back the same shape as the full-body one; `output_long_edge` 0 keeps native crop pixels with no resampling. Outputs `zoomed_image`, a `preview_image` with the crop and face boxes drawn, `crop_region`, and `zoom_factor` — aim for **2× or more**, and the node warns in `result_details` when you're under it.
+
+**Overlay Zoomed Video** (`video/composite`) blends the zoomed lipsync back over the full-body one. Placement is derived, not typed:
+
+| Parameter | Notes |
+|---|---|
+| `base_video` / `overlay_video` | Full-body and zoomed lipsync clips — same audio, same length (validated) |
+| `align_mode` | `auto` detects the face in both clips and matches them; `manual` for explicit scale/centre |
+| `refine_alignment` | After the detector estimate, registers the images directly to correct the last pixel or two. Skipped automatically when the two renders are too dissimilar to match confidently |
+| `scale_adjust` / `offset_x` / `offset_y` | Nudges on top of the auto result — the dial-it-in pass |
+| `coverage` / `edge_shape` / `feather_px` | How much of the zoomed framing to keep, and how softly it lands. `ellipse` hides a seam best; `rounded_rect` / `rectangle` keep more |
+| `color_match` | On by default — two separate generations usually differ slightly in exposure |
+| `audio_source` | `base` by default |
+
+Outputs `composited_video`, an `alignment_preview` still (check this before committing to a long render), and `placement` with the computed numbers.
+
+**How the alignment is derived**, since the choice was measured rather than assumed: scale comes from the **face box diagonal**, not eye separation — on a known-scale round trip the diagonal landed within 0.5% while inter-ocular distance was 7.5% out, because a longer baseline absorbs detector jitter. Position anchors on the eye midpoint. A phase-correlation pass then removes the residual couple of pixels. Measured end to end against a synthetic 2× zoom whose correct placement was known exactly: **scale within 0.2%, position exact, residual shift 0.3px**.
+
 ### Composite Over Background (`CompositeOverBackground`)
 
 Subject video over a background still or video, with alpha from one of four sources. Local ffmpeg + OpenCV — no API, no secrets. One ffmpeg invocation produces both outputs.
@@ -257,6 +287,7 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - **Language identifiers are display names, verified live**: `"Catalan"` (plain — the region-suffixed `"Catalan (Spain)"` form appears in HeyGen's help pages, but the live check accepted and returned plain `"Catalan"`) and `"Spanish (Spain)"`. The node's submit-time validation against `GET /v3/video-translations/languages` catches wrong spellings with suggestions.
 - **API credits are a separate pool from subscription credits.** A funded HeyGen subscription still yields `MOVIO_PAYMENT_INSUFFICIENT_CREDIT` until API credits are purchased for the key's account. Higher resolution consumes credits faster.
 - **32 MB upload cap** on `/v3/assets` applies to the image, the audio, and any locally-hosted source video the translate node has to re-upload.
+- **Encoding raw frames back to video defaults to BT.601 and shifts every pixel.** Any node that decodes to `bgr24`, works in numpy, and re-encodes (the Face Prep tracked crop and composite, Overlay Zoomed Video, the detection preview) must tag the encoder with the source's colour matrix. Measured on BT.709 source: without the tags, green went 160 → 142 and red clipped to 0 across the *whole* frame, including areas the node never touched. All affected nodes now read the source's `color_space` / `color_primaries` / `color_transfer` and pass them to the encoder, which brings untouched pixels back to within ~1.7/255.
 - **ffmpeg's native VP9 decoder silently drops alpha.** A WebM with alpha must be decoded with `-c:v libvpx-vp9` or the alpha layer never appears — you get an opaque rectangle with no error. Related: such files report `pix_fmt=yuv420p` and signal alpha only via the `alpha_mode=1` stream tag, so checking the pixel format alone would reject exactly the files `embedded` mode exists for. Both are handled inside the Composite node.
 - **`alphaextract` needs an explicit `format=yuva420p` in front of it.** Without it ffmpeg fails format negotiation ("The following filters could not choose their formats") — sometimes. Whether it works depends on what else is in the graph, which makes it a nasty intermittent.
 - **Never enable Topaz `frame_interpolation` on a head crop that will be composited back.** Composite Region Back requires the insert's frame count to exactly match the region's — interpolation changes it, and the node will (correctly) refuse. Upscale only.
@@ -289,6 +320,19 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - [ ] Image edit verified on `google/nano-banana-pro/edit` and `openai/gpt-image-2/edit`
 - [ ] InfiniteTalk produces a talking video from image + audio; V2V from video + audio (if V2V 404s, re-check the model path — one WaveSpeed docs page spells it `infinietalk`)
 - [ ] Bad key produces a readable error
+
+## Verification — Zoom To Head + Overlay Zoomed Video (verified offline 2026-08-06)
+
+Driven through the nodes' own methods against real character footage, with a synthetic 2× zoom whose correct placement was known exactly:
+
+- [x] `ZoomToHead` crop contains the face, preserves the source aspect ratio, honours `square`, and reports a 2.1× zoom on a real frame
+- [x] `OverlayZoomedVideo` auto-alignment recovers the known placement exactly (scale within 0.2%, position to the pixel, residual shift 0.3px)
+- [x] Registration refinement measurably improves on the detector estimate (blend difference 14.7 → 5.8) and reports its confidence
+- [x] `scale_adjust` / `offset_x` / `offset_y` move the result as expected
+- [x] Mismatched clip lengths fail naming both frame counts
+- [x] Untouched areas of the frame survive the round trip (1.7/255 after the colour-matrix fix)
+- [x] `alignment_preview` renders with the detected face and blend box drawn
+- [ ] Live run inside the Griptape editor, and a real two-pass lipsync end to end
 
 ## Verification — Composite Over Background (verified against real green-screen footage 2026-08-05)
 

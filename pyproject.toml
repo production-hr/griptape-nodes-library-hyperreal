@@ -1,6 +1,6 @@
 [project]
 name = "griptape-nodes-library-hyperreal"
-version = "0.5.0"
+version = "0.6.0"
 description = "HyperReal's custom node library for Griptape Nodes (HeyGen, DigitalOcean Spaces, ViewComfy)"
 authors = [{ name = "HyperReal", email = "tim.coleman.3d@gmail.com" }]
 readme = "README.md"

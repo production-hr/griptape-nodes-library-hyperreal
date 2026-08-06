@@ -32,6 +32,38 @@ def _ffmpeg_paths() -> tuple[str, str]:
     return static_ffmpeg.run.get_or_fetch_platform_executables_else_raise()
 
 
+def _encoder_color_args(path: Path) -> list[str]:
+    """Keep the source's colour matrix across a rawvideo round trip.
+
+    Decoding to bgr24 uses the source's tagged matrix, but encoding raw frames
+    back defaults to BT.601. On BT.709 source that shifts every pixel, touched or
+    not — measured on a saturated plate, green 160 -> 142 and red clipped to 0.
+    """
+    _, ffprobe = _ffmpeg_paths()
+    result = subprocess.run(
+        [ffprobe, "-v", "error", "-select_streams", "v:0",
+         "-show_entries", "stream=color_space,color_primaries,color_transfer",
+         "-of", "default=noprint_wrappers=1", str(path)],
+        capture_output=True, text=True, timeout=300, check=False,
+    )
+    tags: dict[str, str] = {}
+    for line in (result.stdout or "").splitlines():
+        key, _, value = line.partition("=")
+        value = value.strip()
+        if value and value not in ("unknown", "reserved", "N/A"):
+            tags[key.strip()] = value
+    if not tags:
+        # Untagged source: ffmpeg uses the same default on decode and encode, so the
+        # round trip is already symmetric. Forcing a matrix here would introduce the
+        # very shift this function exists to prevent.
+        return []
+    return [
+        "-colorspace", tags.get("color_space", "bt709"),
+        "-color_primaries", tags.get("color_primaries", "bt709"),
+        "-color_trc", tags.get("color_transfer", "bt709"),
+    ]
+
+
 def _parse_region(value: Any) -> dict:
     if isinstance(value, str):
         value = json.loads(value)
@@ -229,7 +261,7 @@ class CropToRegion(SuccessFailureNode):
                 ffmpeg, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
                 "-s", f"{side}x{side}", "-r", f"{source['frame_rate']:.6f}",
                 "-i", "-", "-an", "-c:v", "libx264", "-preset", "slow",
-                "-crf", str(crf), "-pix_fmt", pix_fmt, str(out_path),
+                "-crf", str(crf), "-pix_fmt", pix_fmt, *_encoder_color_args(source_path), str(out_path),
             ],
             stdin=subprocess.PIPE,
             stdout=subprocess.DEVNULL,
