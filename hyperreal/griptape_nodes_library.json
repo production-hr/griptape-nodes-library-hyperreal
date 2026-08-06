@@ -20,8 +20,8 @@
     ],
     "metadata": {
         "author": "HyperReal",
-        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.4.0",
+        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
+        "library_version": "0.5.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -80,6 +80,14 @@
                 "title": "Face Prep",
                 "description": "Head detection, crop, and paste-back nodes bracketing an external face-swap step",
                 "icon": "Video"
+            }
+        },
+        {
+            "video/composite": {
+                "color": "border-cyan-500",
+                "title": "Composite",
+                "description": "Chroma-key and matte compositing over background stills or videos",
+                "icon": "Layers"
             }
         },
         {
@@ -171,6 +179,15 @@
                 "category": "video/faceprep",
                 "description": "Composite the swapped head region back onto the original plate video.",
                 "display_name": "Composite Region Back"
+            }
+        },
+        {
+            "class_name": "CompositeOverBackground",
+            "file_path": "composite/composite_over_background.py",
+            "metadata": {
+                "category": "video/composite",
+                "description": "Composite a subject video over a background image or video, keying or matting as needed.",
+                "display_name": "Composite Over Background"
             }
         },
         {

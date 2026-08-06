@@ -9,6 +9,7 @@ HYPERREAL NODES
 │  ├─ TOPAZ             Topaz Video Upscale
 │  ├─ WAVESPEED         WaveSpeed InfiniteTalk · WaveSpeed InfiniteTalk V2V
 │  └─ FACE PREP         Detect Head Region · Crop To Region · Composite Region Back
+│  └─ COMPOSITE         Composite Over Background
 ├─ IMAGE
 │  └─ WAVESPEED         WaveSpeed Image Edit
 ├─ STORAGE
@@ -161,6 +162,47 @@ Load Video → Detect Head Region → Crop To Region → Topaz Video Upscale →
 
 First run of any of these downloads the ffmpeg binaries once (via `static-ffmpeg`).
 
+### Composite Over Background (`CompositeOverBackground`)
+
+Subject video over a background still or video, with alpha from one of four sources. Local ffmpeg + OpenCV — no API, no secrets. One ffmpeg invocation produces both outputs.
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `foreground_video` | VideoUrlArtifact | The subject |
+| `background` | Image or Video artifact | Still plate or moving background; ignored when `output_alpha` is on |
+| `matte_source` | key_auto / key_manual / external / embedded | `key_auto` (default) samples the key colour from the footage |
+| `key_color` | str | For `key_manual`. Accepts `#00B140` or `0x00B140` |
+| `key_algorithm` | chromakey / colorkey | `chromakey` keys on UV and ignores luma |
+| `similarity` | float | **Default 0.10 — see the tuning note below** |
+| `blend` | float | Edge softness, default 0.10 |
+| `matte_video` | VideoUrlArtifact | For `external`. Luma is read as alpha |
+| `invert_matte` | bool | For black = opaque sources (applies to `external` / `embedded`) |
+| `despill` / `despill_amount` | bool / float | Green spill removal, on by default, independent of `matte_source` |
+| `matte_erode_px` / `matte_feather_px` | int | Erode then feather; both drop out of the graph at 0 |
+| `background_fit` | cover / contain / stretch | The foreground is **never** resampled; the background conforms |
+| `audio_source` | foreground / background / none | |
+| `output_alpha` | bool | Skip compositing, emit a VP9 alpha webm — makes this a standalone keyer |
+| `crf`, `output_directory` | int, str | |
+
+Outputs: `composited_video`, `matte` (the alpha as black-and-white video), `detected_key_color` (what `key_auto` measured — paste into `key_color` for a repeatable run).
+
+**Matte polarity: white = opaque, black = transparent.** The ecosystem isn't consistent about this (the VOID library uses white = *remove*), so `invert_matte` makes a wrong-polarity export a checkbox rather than a re-render.
+
+**Tuning `similarity` — the window is narrow and the failure is abrupt.** Measured on real generated footage (a dark-clothed subject on green):
+
+| similarity | subject kept | backing removed |
+|---|---|---|
+| 0.10 | 99.7% | 90.8% |
+| 0.12 | 95.7% | 95.5% |
+| **0.15** | **4.5%** | 98.2% |
+| 0.25 | 0.0% | 100% |
+
+Dark clothing sits close to green in UV space, so past ~0.12 the key eats the subject. Start at the 0.10 default; if green fringe remains, nudge toward 0.12; if the subject starts vanishing, you have gone over. **Wire the `matte` output to a Display Video while tuning** — judging this from the composite is miserable.
+
+**The matte round-trip workflow**: run `key_auto`, take the `matte` output into Resolve/AE, fix what the key got wrong, then feed the fixed clip back as `matte_video` with `matte_source: external`. The node validates that the returned matte has the same frame count and fps as the foreground and fails naming both numbers if not — a matte off by two frames is subtly wrong everywhere and maddening to diagnose. Verified: a round trip with an unmodified matte reproduces the `key_auto` composite (mean pixel difference 1.0/255).
+
+For the source footage itself: fill the frame with green, keep the field flat (no floor line, gradient, or vignette), nothing green on the subject, highest resolution available, and `expressiveness: "low"` on the HeyGen leg — camera drift on a locked-off plate reads as a cutout faster than any keying artefact.
+
 ### Upload to Spaces (`UploadToSpaces`)
 
 Media artifact → object in a DigitalOcean Spaces bucket, returning its public URL. Spaces is S3-compatible, so the node uses `boto3` with a custom `endpoint_url` — no DO-specific SDK.
@@ -215,6 +257,8 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - **Language identifiers are display names, verified live**: `"Catalan"` (plain — the region-suffixed `"Catalan (Spain)"` form appears in HeyGen's help pages, but the live check accepted and returned plain `"Catalan"`) and `"Spanish (Spain)"`. The node's submit-time validation against `GET /v3/video-translations/languages` catches wrong spellings with suggestions.
 - **API credits are a separate pool from subscription credits.** A funded HeyGen subscription still yields `MOVIO_PAYMENT_INSUFFICIENT_CREDIT` until API credits are purchased for the key's account. Higher resolution consumes credits faster.
 - **32 MB upload cap** on `/v3/assets` applies to the image, the audio, and any locally-hosted source video the translate node has to re-upload.
+- **ffmpeg's native VP9 decoder silently drops alpha.** A WebM with alpha must be decoded with `-c:v libvpx-vp9` or the alpha layer never appears — you get an opaque rectangle with no error. Related: such files report `pix_fmt=yuv420p` and signal alpha only via the `alpha_mode=1` stream tag, so checking the pixel format alone would reject exactly the files `embedded` mode exists for. Both are handled inside the Composite node.
+- **`alphaextract` needs an explicit `format=yuva420p` in front of it.** Without it ffmpeg fails format negotiation ("The following filters could not choose their formats") — sometimes. Whether it works depends on what else is in the graph, which makes it a nasty intermittent.
 - **Never enable Topaz `frame_interpolation` on a head crop that will be composited back.** Composite Region Back requires the insert's frame count to exactly match the region's — interpolation changes it, and the node will (correctly) refuse. Upscale only.
 - **WaveSpeed's upload API returns `data.download_url`, not the documented `data.url`.** Discovered live 2026-08-05; the nodes accept both, but keep it in mind when writing new WaveSpeed nodes.
 - **Auto-versioned save filenames use `{_index?:03}`, not `{###}`.** In Save-node `output_file` templates, the engine's version counter is the `_index` macro variable (`?` = optional so the first save resolves, `:03` = zero-pad). Save situations with the CREATE_NEW collision policy (e.g. `save_node_output`) already append it automatically on collision.
@@ -245,6 +289,23 @@ All calls target `https://api.heygen.com` with an `X-Api-Key` header, per-submis
 - [ ] Image edit verified on `google/nano-banana-pro/edit` and `openai/gpt-image-2/edit`
 - [ ] InfiniteTalk produces a talking video from image + audio; V2V from video + audio (if V2V 404s, re-check the model path — one WaveSpeed docs page spells it `infinietalk`)
 - [ ] Bad key produces a readable error
+
+## Verification — Composite Over Background (verified against real green-screen footage 2026-08-05)
+
+Run against a 720×1280 generated clip with a dark-clothed subject on green:
+
+- [x] Node appears under **HyperReal Nodes → Video → Composite**; the existing 10 nodes still load; no engine restart needed
+- [x] `key_auto` detects the backing colour and composites over a still plate; matte reads 55% opaque / 42% transparent with a clean subject edge
+- [x] `matte` output responds to `similarity` / `blend` (full sweep measured; see the tuning table above)
+- [x] Round trip: `matte` output fed back as `external` reproduces the composite (mean difference 1.0/255)
+- [x] An inverted matte plus `invert_matte=true` matches the non-inverted result (1.2/255)
+- [x] A frame-count-mismatched `matte_video` fails naming both counts
+- [x] `output_alpha=true` produces a VP9 webm whose alpha extracts correctly; `embedded` mode on it composites without keying
+- [x] `embedded` on a plain mp4 fails naming the `pix_fmt`
+- [x] A moving video background works, conformed to the foreground's frame rate
+- [x] A background shorter than the foreground fails naming both durations
+- [ ] Live run inside the Griptape editor (all of the above was driven through the node's own methods, not the UI)
+- [ ] A HeyGen green-background clip end to end, with the subject's audio surviving
 
 ## Verification — Face Prep nodes (round-trip machinery verified offline 2026-08-05; live checklist pending)
 
