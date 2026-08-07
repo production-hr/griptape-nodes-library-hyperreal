@@ -30,6 +30,7 @@ MAX_POLL_SECONDS = 5.0
 LOCAL_HOSTS = {"localhost", "127.0.0.1", "0.0.0.0", "::1"}
 
 # Model path -> max reference images (nano-banana caps at 14, gpt-image-2 at 16).
+REFERENCE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp"}
 MODELS = {
     "google/nano-banana-pro/edit": 14,
     "google/nano-banana-2/edit": 14,
@@ -97,11 +98,25 @@ class WaveSpeedImageEdit(SuccessFailureNode):
             )
         )
         self.add_parameter(
+            Parameter(
+                name="reference_directory",
+                input_types=["str"],
+                type="str",
+                default_value="",
+                tooltip="Optional folder of reference images, e.g. {project_dir}/inputs/images/characters/x/head. "
+                "Every image in it is used, sorted by filename, BEFORE anything connected to 'images' — so "
+                "name files 01_, 02_ ... with the strongest reference last, and connect an anchor to 'images' "
+                "to have it weigh most. Saves wiring a Load Image node per reference.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            )
+        )
+        self.add_parameter(
             ParameterList(
                 name="images",
                 input_types=["ImageArtifact", "ImageUrlArtifact"],
                 default_value=[],
-                tooltip="Reference images (up to 14 for the Google models, 16 for GPT Image 2).",
+                tooltip="Reference images, used AFTER anything from reference_directory. Up to 14 total for the "
+                "Google models, 16 for GPT Image 2.",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )
@@ -218,16 +233,30 @@ class WaveSpeedImageEdit(SuccessFailureNode):
                 raise ValueError("No prompt set.")
 
             model = self.parameter_values.get("model") or "google/nano-banana-pro/edit"
-            references = [a for a in self.get_parameter_list_value("images") if a is not None]
+            # Folder references first, connected ones after: later references bias the
+            # generation more, so an anchor wired to 'images' stays the strongest.
+            folder_files = self._reference_directory_files()
+            connected = [a for a in self.get_parameter_list_value("images") if a is not None]
+            references: list[Any] = [str(path) for path in folder_files] + connected
             if not references:
-                raise ValueError("Connect at least one reference image.")
+                raise ValueError(
+                    "No reference images. Set reference_directory to a folder of images, connect images, or both."
+                )
             max_images = MODELS.get(model, 14)
             if len(references) > max_images:
-                raise ValueError(f"{model} accepts at most {max_images} reference images (got {len(references)}).")
+                raise ValueError(
+                    f"{model} accepts at most {max_images} reference images (got {len(references)}: "
+                    f"{len(folder_files)} from reference_directory, {len(connected)} connected)."
+                )
 
             image_urls = [
                 self._artifact_to_url(api_key, artifact, f"image {i + 1}") for i, artifact in enumerate(references)
             ]
+            source_note = ""
+            if folder_files:
+                source_note = "\nReferences (in order): " + ", ".join(
+                    [p.name for p in folder_files] + [f"<connected {i + 1}>" for i in range(len(connected))]
+                )
 
             body: dict[str, Any] = {
                 "prompt": prompt,
@@ -256,11 +285,38 @@ class WaveSpeedImageEdit(SuccessFailureNode):
             saved_note = "\nSaved files:\n" + "\n".join(self._saved_files) if self._saved_files else ""
             self._set_status_results(
                 was_successful=True,
-                result_details=f"Prediction {prediction_id} ({model}) completed in {elapsed}s.{saved_note}",
+                result_details=(
+                    f"Prediction {prediction_id} ({model}) completed in {elapsed}s "
+                    f"using {len(references)} reference image(s).{source_note}{saved_note}"
+                ),
             )
         except Exception as e:
             self._set_status_results(was_successful=False, result_details=str(e))
             self._handle_failure_exception(e)
+
+    def _reference_directory_files(self) -> list[Path]:
+        """Image files in reference_directory, sorted by filename.
+
+        Sorted rather than arbitrary because reference order is meaningful to the
+        model - later references bias more strongly - so a 01_, 02_ ... naming
+        convention gives deliberate control over weighting.
+        """
+        directory = (self.parameter_values.get("reference_directory") or "").strip()
+        if not directory:
+            return []
+        dir_path = self._resolve_directory(directory)
+        if not dir_path.is_dir():
+            raise ValueError(f"reference_directory {directory!r} is not a folder (resolved to {dir_path}).")
+        files = sorted(
+            (p for p in dir_path.iterdir() if p.is_file() and p.suffix.lower() in REFERENCE_EXTENSIONS),
+            key=lambda p: p.name.lower(),
+        )
+        if not files:
+            raise ValueError(
+                f"reference_directory {dir_path} contains no images "
+                f"({', '.join(sorted(REFERENCE_EXTENSIONS))})."
+            )
+        return files
 
     # -- WaveSpeed API helpers ----------------------------------------------
 
