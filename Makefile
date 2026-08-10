@@ -108,6 +108,10 @@ fix: ## Fix project.
 	@$(MAKE) --no-print-directory format
 	@uv run ruff check --fix --unsafe-fixes
 
+.PHONY: test
+test: ## Run tests.
+	@uv run pytest
+
 .PHONY: check
 check: check/format check/lint check/types check/json ## Run all checks.
 
