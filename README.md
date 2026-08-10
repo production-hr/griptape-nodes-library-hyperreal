@@ -11,14 +11,17 @@ HYPERREAL NODES
 │  └─ FACE PREP         Detect Head Region · Crop To Region · Composite Region Back
 │  └─ COMPOSITE         Composite Over Background · Overlay Zoomed Video
 ├─ IMAGE
+│  ├─ TOPAZ             Topaz Image Upscale
 │  ├─ FACE PREP         Zoom To Head
 │  └─ WAVESPEED         WaveSpeed Image Edit
+├─ CONFIG
+│  └─ SHOT              Shot Settings
 ├─ STORAGE
 │  └─ SPACES            Upload to Spaces
 └─ VIEWCOMFY (planned)
 ```
 
-Current contents: **HeyGen** nodes — generate lipsync avatar videos from an image + audio (Avatar IV), and translate videos into other languages with lip-sync and voice preservation; the **Topaz Video Upscale** node — upscale videos (e.g. HeyGen 1080p output → 4K deliverables) via the Topaz Labs API; and the **Upload to Spaces** node, which puts any media artifact into a DigitalOcean Spaces bucket and returns a public URL (needed by external APIs like ViewComfy that must fetch inputs over HTTP).
+Current contents: **HeyGen** nodes — generate lipsync avatar videos from an image + audio (Avatar IV), and translate videos into other languages with lip-sync and voice preservation; the **Topaz** nodes — upscale videos (e.g. HeyGen 1080p output → 4K deliverables) and still images (head crops destined for a lipsync pass) via the Topaz Labs API; and the **Upload to Spaces** node, which puts any media artifact into a DigitalOcean Spaces bucket and returns a public URL (needed by external APIs like ViewComfy that must fetch inputs over HTTP).
 
 [![Add to Griptape Nodes](https://img.shields.io/badge/Add%20to-Griptape%20Nodes-blue)](https://nodes.griptape.ai/#library-management?git=https://github.com/production-hr/griptape-nodes-library-hyperreal)
 
@@ -102,6 +105,31 @@ Video → upscaled video via the [Topaz Labs Video API](https://developer.topazl
 
 Outputs: `upscaled_video` (VideoUrlArtifact), `request_id` (str). Audio is copied through untouched (`audioTransfer: Copy`) — important for lipsync. `result_details` reports the billed credit estimate (Topaz bills the **lower bound** of the estimate; the first API request is free). Polls up to 60 minutes (10s → 30s backoff).
 
+### Topaz Image Upscale (`TopazImageUpscale`)
+
+Still image → upscaled still, via the [Topaz Labs Image API](https://developer.topazlabs.com/). A **separate API surface** from the video node above: `POST /image/v1/enhance/async` → `GET /image/v1/status/{id}` → `GET /image/v1/download/{id}`, multipart upload, billed per **output** megapixel. Same `TOPAZ_API_KEY`. There is no synchronous image endpoint.
+
+The download step returns `{download_url, head_url, expiry}` and the link lives **1 hour**, so the result is downloaded immediately and re-hosted via static files, like the HeyGen and Topaz video outputs. `head_url` is metadata-only — presigned S3 URLs are signed per HTTP method, so it will not serve a GET.
+
+Built for the zoomed-face lipsync pass. A head crop taken from a full-body frame has too few pixels across the eyes and mouth, and Avatar IV then produces visible eyelid artifacting on blinks. Enlarging the crop with real detail *before* generation fixes it at the source.
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `image` | ImageArtifact / ImageUrlArtifact | e.g. `zoomed_image` from Zoom To Head |
+| `model` | High Fidelity V2 / Standard V2 / Low Resolution V2 / CGI / Text Refine | High Fidelity V2 (default) suits clean, already-sharp sources like an AI-generated frame; Low Resolution V2 for genuinely soft originals |
+| `output_long_edge` | int | Target longest side, default 1920. **Only this one dimension is sent** so Topaz scales the other proportionally — see the letterbox gotcha below. 0 = let the model pick its scale |
+| `face_enhancement` | bool | Default on. The setting that matters here — rebuilds eyes, eyelids, mouth |
+| `face_enhancement_strength` | float 0–1 | Default 0.8 |
+| `face_enhancement_creativity` | float 0–1 | **Default 0, and leave it there for a real person.** Above 0 Topaz invents facial detail, which drifts the likeness |
+| `subject_detection` | All / Foreground / Background | Default `All`. **Title case** — the API rejects lowercase, and the published docs show both casings. The node normalises whatever is saved, so an older workflow holding `all` still works |
+| `denoise`, `sharpen`, `fix_compression`, `strength` | float | `-1` (default) omits the field so Topaz auto-tunes. Not the same as `0`, which explicitly asks for none |
+| `output_format` | png / jpeg / jpg / tiff / tif | Default `png` — lossless, correct when the result feeds another generative pass. **No webp on output** (it is fine as an *input*) |
+| `output_directory` | str | Optional folder to also save into (supports `{project_dir}/...`) |
+
+Outputs: `upscaled_image` (ImageUrlArtifact), `process_id` (str), `size_report` (json — source/output dimensions and achieved scale). Limits enforced before upload: 512 MP input, 1024 MP output, 500 MB request. Polls up to 15 minutes (2s → 10s backoff).
+
+**Letterbox gotcha:** if you send *both* `output_width` and `output_height` and the aspect doesn't match the source, Topaz letterboxes the result — which would silently corrupt a downstream lipsync. The node therefore sends only the long edge and lets Topaz derive the other dimension, and it still compares input vs. output aspect afterwards and warns in `result_details` if they diverge.
+
 ### WaveSpeed nodes (`WaveSpeedImageEdit`, `WaveSpeedInfiniteTalk`, `WaveSpeedInfiniteTalkV2V`)
 
 Three nodes over the [WaveSpeed AI](https://wavespeed.ai/) platform, grouped by input signature. All share the same plumbing: media inputs in any of the usual forms; already-public http(s) URLs are passed to WaveSpeed as-is, everything else (local files, `localhost` static URLs, raw bytes) is transparently uploaded via WaveSpeed's media API (200 MB cap, 7-day retention); results are downloaded and re-hosted via static files (WaveSpeed deletes files after 7 days), with the usual optional `output_directory`.
@@ -163,16 +191,43 @@ Load Video → Detect Head Region → Crop To Region → Topaz Video Upscale →
 
 First run of any of these downloads the ffmpeg binaries once (via `static-ffmpeg`).
 
+### Shot Settings (`ShotSettings`)
+
+One node holding the values several nodes in a shot must **agree** on. A `DataNode`, so it has no control wiring — it resolves as a dependency of whatever reads it.
+
+| Output | Default | Wire to |
+|---|---|---|
+| `aspect_ratio` | `9:16` | both lipsync nodes |
+| `resolution` | `1080p` | both lipsync nodes |
+| `expressiveness` | `low` | both lipsync nodes |
+| `upscale_long_edge` | `1920` | Topaz Image Upscale |
+| `output_directory` | `""` | any node that saves a copy |
+
+The point isn't fewer keystrokes, it's that a two-pass lipsync is only correct when both passes share an aspect, resolution and motion level. Set per-node, that's three chances to diverge, and divergence doesn't announce itself — it shows up as a broken composite after both generations are paid for.
+
+**`auto` is not offered here.** HeyGen documents it as following the input image; measured, it returned 16:9 for a portrait input, pillarboxing the subject. A shot's aspect is a decision, so this node makes you make it. (`auto` remains selectable on the HeyGen node itself so older workflows still load — its default is now `9:16`.)
+
+`aspect_ratio`, `resolution` and `expressiveness` on **HeyGen Avatar Video** accept connections as of v0.9.0; they were property-only before.
+
 ### Zoom To Head + Overlay Zoomed Video — the two-pass lipsync trick
 
 Lipsyncing a full-body frame gives a small, soft face. These two nodes run the same audio through a second lipsync pass on a head-and-shoulders crop, then blend that better face back over the wide shot:
 
 ```
-Full-body image ─┬─────────────────────► Lipsync (full body) ──┐
-                 │                                              ├─► Overlay Zoomed Video ─► Save
-                 └─► Zoom To Head ─► Lipsync (zoomed face) ─────┘
-Voiceover ───────────────► both lipsync passes (same audio = same length)
+Full-body image ─┬───────────────────────────────────────────► Lipsync (full body) ──┐
+                 │                                                                     ├─► Overlay Zoomed Video ─► Save
+                 └─► Zoom To Head ─► Topaz Image Upscale ─► Lipsync (zoomed face) ────┘
+Voiceover ──────────────────────────► both lipsync passes (same audio = same length)
 ```
+
+**If the plate is a green screen**, author the green at `RGB(0, 255, 0)` *before* the lipsync pass, by replacing the original white background — never try to produce or repair a keyable green downstream of a generator. See [docs/replica-plate-delivery.md](docs/replica-plate-delivery.md) for the arithmetic; the short version is that a runtime keyer's margin (`green − max(red, blue)`) is 255 for pure green against 46 for a mid, cyan-leaning one, and generator flicker only matters relative to that margin.
+
+**Why the upscale is in there.** HeyGen returns `1080p` meaning *short edge 1080*, whatever you feed it (measured: portrait → 1080×1920, landscape → 1920×1080, 4:5 → 1080×1350). So the zoomed pass is already 1080p without any help — the upscale is not there for frame size. It is there because Avatar IV's output quality tracks how many pixels the **features** have in the *input*: a head crop straight out of a full-body frame has too few pixels across the eyes, and blinks come back with artifacted eyelids. Topaz face recovery puts real detail into the eyes and mouth before generation.
+
+Two consequences worth keeping straight:
+
+- Leave Zoom To Head's `output_long_edge` at **0**. Feeding Topaz the native crop pixels is right; handing it a Lanczos-enlarged image first only gives it a softer source to work from.
+- The upscale cannot raise the **final** resolution — the composite is base-sized, and the zoomed face is scaled *down* into it. That downscale is the point (generating at high detail and downsampling is what makes the face read sharp), but if you want a bigger deliverable, that is `Topaz Video Upscale` on the composite, not this node.
 
 **Zoom To Head** (`image/faceprep`) crops the head-and-shoulders framing out of the full-body image, replacing a manual trip through Resolve. Detects the face with YuNet, then pads by `pad_top` / `pad_bottom` / `pad_sides` (fractions of face size, same idea as Detect Head Region). `aspect_ratio` defaults to `source` so the zoomed render comes back the same shape as the full-body one; `output_long_edge` 0 keeps native crop pixels with no resampling. Outputs `zoomed_image`, a `preview_image` with the crop and face boxes drawn, `crop_region`, and `zoom_factor` — aim for **2× or more**, and the node warns in `result_details` when you're under it.
 
@@ -180,7 +235,7 @@ Voiceover ───────────────► both lipsync passes (
 
 | Parameter | Notes |
 |---|---|
-| `base_video` / `overlay_video` | Full-body and zoomed lipsync clips — same audio, same length (validated) |
+| `base_video` / `overlay_video` | Full-body and zoomed lipsync clips — same audio, same length (validated). The overlay is also **refused if it is pillar- or letterboxed**: black bars are frame content, so they would be blended over the plate as a dark rectangle around the face. The check is deliberately strict so a genuinely dark clip is not mistaken for bars: near-zero brightness *and* variance, present in every sampled frame, brighter content in the middle than at the edges, and **bars paired on opposite edges** — padding is always centred, so darkness against one edge only is content (a black chair behind a head) and is ignored |
 | `align_mode` | `auto` detects the face in both clips and matches them; `manual` for explicit scale/centre |
 | `refine_alignment` | After the detector estimate, registers the images directly to correct the last pixel or two. Skipped automatically when the two renders are too dissimilar to match confidently |
 | `scale_adjust` / `offset_x` / `offset_y` | Nudges on top of the auto result — the dial-it-in pass |

@@ -20,8 +20,8 @@
     ],
     "metadata": {
         "author": "HyperReal",
-        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.7.0",
+        "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
+        "library_version": "0.9.1",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -67,6 +67,14 @@
             }
         },
         {
+            "image/topaz": {
+                "color": "border-purple-500",
+                "title": "Topaz",
+                "description": "Still-image upscaling and face recovery using the Topaz Labs Image API",
+                "icon": "Image"
+            }
+        },
+        {
             "image/faceprep": {
                 "color": "border-amber-500",
                 "title": "Face Prep",
@@ -96,6 +104,14 @@
                 "title": "Composite",
                 "description": "Chroma-key and matte compositing over background stills or videos",
                 "icon": "Layers"
+            }
+        },
+        {
+            "config/shot": {
+                "color": "border-slate-500",
+                "title": "Shot",
+                "description": "Settings shared by every node in a shot, wired from one place",
+                "icon": "Sliders"
             }
         },
         {
@@ -133,6 +149,15 @@
                 "category": "video/topaz",
                 "description": "Upscale and/or retime a video with Topaz Labs (Proteus, Iris, Artemis, Nyx; Chronos/Apollo frame interpolation).",
                 "display_name": "Topaz Video Upscale"
+            }
+        },
+        {
+            "class_name": "TopazImageUpscale",
+            "file_path": "topaz/image_upscale.py",
+            "metadata": {
+                "category": "image/topaz",
+                "description": "Upscale and restore a still image with Topaz Labs, with face recovery for lipsync-quality head crops.",
+                "display_name": "Topaz Image Upscale"
             }
         },
         {
@@ -214,6 +239,15 @@
                 "category": "video/composite",
                 "description": "Composite a subject video over a background image or video, keying or matting as needed.",
                 "display_name": "Composite Over Background"
+            }
+        },
+        {
+            "class_name": "ShotSettings",
+            "file_path": "config/shot_settings.py",
+            "metadata": {
+                "category": "config/shot",
+                "description": "Shared shot settings (aspect, resolution, expressiveness) wired to every node that must agree on them.",
+                "display_name": "Shot Settings"
             }
         },
         {

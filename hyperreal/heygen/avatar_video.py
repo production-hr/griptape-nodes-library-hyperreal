@@ -102,20 +102,26 @@ class HeyGenAvatarVideo(SuccessFailureNode):
         self.add_parameter(
             Parameter(
                 name="aspect_ratio",
+                input_types=["str"],
                 type="str",
-                default_value="auto",
-                tooltip="Output aspect ratio. 'auto' follows the input image.",
-                allowed_modes={ParameterMode.PROPERTY},
+                default_value="9:16",
+                tooltip="Output aspect ratio. Set this explicitly. 'auto' is documented as following the "
+                "input image but was measured returning 16:9 for a portrait input, which pillarboxes the "
+                "subject — black bars baked into the frame that poison any downstream composite. "
+                "Connectable, so a Shot Settings node can drive every clip in a shot.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 traits={Options(choices=ASPECT_RATIOS)},
             )
         )
         self.add_parameter(
             Parameter(
                 name="resolution",
+                input_types=["str"],
                 type="str",
                 default_value="1080p",
-                tooltip="Output video resolution.",
-                allowed_modes={ParameterMode.PROPERTY},
+                tooltip="Output video resolution. '1080p' means the SHORT edge is 1080 — portrait comes back "
+                "1080x1920, landscape 1920x1080 — whatever the input size.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 traits={Options(choices=RESOLUTIONS)},
             )
         )
@@ -133,10 +139,12 @@ class HeyGenAvatarVideo(SuccessFailureNode):
         self.add_parameter(
             Parameter(
                 name="expressiveness",
+                input_types=["str"],
                 type="str",
                 default_value="low",
-                tooltip="Energy and movement range of the avatar.",
-                allowed_modes={ParameterMode.PROPERTY},
+                tooltip="Energy and movement range of the avatar. Keep it low when two passes will be "
+                "composited: camera drift differs between generations and makes the overlay slide.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
                 traits={Options(choices=EXPRESSIVENESS_LEVELS)},
             )
         )

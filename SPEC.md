@@ -367,7 +367,79 @@ The node can only key what it's given. For the HeyGen leg:
 - **Foreground transform** (scale / position / rotate). This node composites full-frame subject over full-frame background; repositioning is `image_blend_compositor`'s job in the image domain and nobody's in the video domain. Out of scope until there's a real need.
 - **Batch handling.** Out of scope per the standing 1–5 ad-hoc jobs rule.
 
-## 8. Reference
+## 8. Node: `Topaz Image Upscale` (`TopazImageUpscale`)
+
+Still-image upscale + face recovery, to sit between `Zoom To Head` and the zoomed lipsync pass in §7's two-pass trick. Contract verified against developer.topazlabs.com on 2026-08-08.
+
+**Motivation (from live testing, not theory).** HeyGen's `1080p` means *short edge 1080* regardless of input size — measured across real outputs: portrait → 1080×1920, landscape → 1920×1080, 4:5 → 1080×1350. So the zoomed pass is already 1080p and frame size is *not* the problem. The problem is feature density in the **input**: a head crop from a full-body frame carries too few pixels across the eyes, and Avatar IV returns artifacted eyelids on blinks. Topaz face recovery adds real detail before generation. Confirmed by hand before being automated.
+
+- Directory `hyperreal/topaz/image_upscale.py`, category `image/topaz` (new IMAGE → TOPAZ category). Secret: the existing `TOPAZ_API_KEY` — **no new secret, so no engine restart**. No new pip deps (`requests`, `cv2`, `numpy` all already present).
+- **A different API surface from §4.** Async only; there is no synchronous image endpoint.
+  1. `POST https://api.topazlabs.com/image/v1/enhance/async`, header `X-API-Key`, **multipart/form-data** (`image` file part + string form fields) → `{process_id}`
+  2. `GET /image/v1/status/{process_id}` → `{status: Completed|Processing|Failed|Cancelled}`
+  3. `GET /image/v1/download/{process_id}` → `{download_url, head_url, expiry}` — **not** `{url}`, which is what the endpoint-list page implies. GET the `download_url`; `head_url` is presigned for metadata only and an S3 signature is bound to its HTTP method, so a GET against it would 403. Link expires **1 hour** after the job completes. The node also tolerates a direct byte body, and on an unrecognised shape reports the keys it received rather than a truncated blob.
+- **Models** (dropdown): `High Fidelity V2` (default — clean, already-sharp sources such as an AI-generated frame), `Standard V2`, `Low Resolution V2`, `CGI`, `Text Refine`. The generative family (`Standard MAX`, `Recovery V2`, `Wonder`, `Redefine`) lives behind `/enhance-gen/async` and is **deliberately not offered**: it invents detail freely, which is wrong for a likeness.
+- **Sizing — the one real trap.** If both `output_width` and `output_height` are sent and the aspect doesn't match the source, Topaz **letterboxes**. A letterbox bar fed into a lipsync pass corrupts it silently. The node therefore exposes a single `output_long_edge`, picks `output_width` or `output_height` by source orientation, sends only that one, and lets Topaz derive the other proportionally. It then compares input vs. output aspect and warns in `result_details` if they diverge anyway.
+- **Face params:** `face_enhancement` (default on — the whole point), `face_enhancement_strength` (0.8), `face_enhancement_creativity` (**0**, and documented to stay there for a real person; above 0 the likeness drifts).
+- **Auto sentinel:** `denoise` / `sharpen` / `fix_compression` / `strength` default to `-1`, meaning *omit the field* so Topaz auto-tunes. Distinct from `0`, which explicitly asks for none.
+- **Enum casing — found the hard way, 400 on the first live call.** `subject_detection` must be **title case**: `All` / `Foreground` / `Background`. Lowercase returns `HTTP 400: parameter "subject_detection" must be one of [All Foreground Background]`. The published docs show *both* casings on different pages, so the server is the authority. The node normalises any saved casing on the way out so older workflows keep working. `output_format` is the opposite — **lowercase**, and the accepted set is `jpeg` / `jpg` / `png` / `tiff` / `tif`, with **no webp** (webp is fine as an input). `model` strings are verbatim title case.
+- **Limits enforced before upload:** 512 MP input, 1024 MP output, 500 MB request. Billed per **output** megapixel, so the guard is also a cost guard. Poll 15 min max, 2s → 10s backoff.
+- **Failure policy:** 401 → readable "check TOPAZ_API_KEY"; terminal statuses surface the API message; 429 honours `Retry-After` (4 attempts); timeout surfaces `process_id` so the job can be chased.
+
+### Definition of done (Topaz Image)
+
+- [x] Node appears under **HyperReal Nodes → Image → Topaz**; all 14 nodes still load
+- [x] 776×1380 crop + `output_long_edge` 1920 sends `output_height=1920` only, and Topaz's proportional width lands on 1079.7 ≈ 1080 — aspect `0.56232` preserved exactly
+- [x] Landscape source flips to `output_width`; `output_long_edge=0` sends neither
+- [x] `-1` knobs omitted, explicit `0` sent; `face_enhancement=false` drops its sub-fields; creativity clamped to 0–1
+- [x] Over-limit output rejected before upload; letterbox tripwire silent on a matching aspect, warns on a changed one
+- [x] `subject_detection` normalised to title case from any saved casing; `output_format` lowercased and validated with webp falling back to png
+- [ ] **Live:** one real call returns a 1080×1920 png with visibly better eye detail, and the zoomed lipsync comes back without eyelid artifacting on blinks
+
+## 9. Node: `Shot Settings` (`ShotSettings`) + the pillarbox guard
+
+Added 2026-08-08 after a live failure: both lipsync passes were left on `aspect_ratio: auto`, HeyGen returned **16:9 for portrait inputs**, and the zoomed render came back pillarboxed. `OverlayZoomedVideo` then scaled that frame — bars included — and blended it over the plate as a dark rectangle around the face. Alignment computed correctly throughout, which is what made it insidious: nothing failed, the render was just wrong after both generations had been paid for.
+
+Two changes, because the failure had two causes.
+
+**1. A shared source of truth.** `hyperreal/config/shot_settings.py`, category `config/shot` (new CONFIG group). A `DataNode` — no control wiring, resolves as a dependency of whatever reads it. Five parameters, each `PROPERTY | OUTPUT`: `aspect_ratio` (default `9:16`), `resolution` (`1080p`), `expressiveness` (`low`), `upscale_long_edge` (`1920`), `output_directory` (`""`). `process()` copies properties to outputs, falling back to declared defaults so an untouched node still publishes usable values.
+
+- **`auto` is not among the choices.** A shot's aspect is a decision; the node forces it. `auto` stays selectable on the HeyGen node so saved workflows load, but its default moved `auto` → `9:16` and its tooltip now records the measured behaviour.
+- Required making `aspect_ratio` / `resolution` / `expressiveness` on `HeyGenAvatarVideo` `INPUT | PROPERTY`; they were `PROPERTY`-only and could not accept a connection at all. Widening `allowed_modes` is backwards-compatible.
+- Considered and rejected: Griptape's own variables system (`Create Variable` / `Get Variable`, plus workflow-scoped `{VARIABLE_NAME}` substitution). Substitution operates on parameter *values*, and these are `Options` dropdowns — there is nowhere to type a token. It would still have needed the `INPUT` change, and then a wire, so a purpose-built node with named outputs is the smaller thing.
+
+**2. A guard, so the same class of error cannot reach a render again.** `OverlayZoomedVideo._validate` checked frame count and frame rate but never geometry. It now refuses an overlay with bars baked in, reporting bar widths, the content aspect, the frame aspect and the base aspect, and naming `auto` as the usual cause.
+
+- Detection is deliberately strict — a bar column must be near-zero brightness (`mean <= 12`) **and** near-zero variance (`std <= 3`), and be present in **every** sampled frame (minimum across 5 samples), so one dark frame cannot manufacture one.
+- Each side is scanned no further than **45%** of the dimension. Without the cap a wholly dark frame reports bars wider than the frame itself and computes a negative content aspect — caught by the false-positive test, not by inspection.
+- A pillarbox is dark bars around *brighter* content, so the check is skipped when the middle is no brighter than the edges (`centre mean <= 24`). This is what keeps a night exterior or a black backdrop from being refused.
+- **Bars must be PAIRED on opposite edges** — `min(left, right)` and `min(top, bottom)`, not `max`. Padding to a different aspect is always *centred*, so a real letterbox is top **and** bottom. Shipped first with `max`, which produced a false positive on a good Ozzy render: the black throne behind his head filled the bottom of frame and measured `0px top / 71px bottom` = 3.7%, over the 2% threshold, and blocked the composite. Regression test covers a 1080×1920 clip with 71 dark rows at the bottom only.
+
+### Definition of done (Shot Settings + guard)
+
+- [x] `ShotSettings` publishes all five values, including defaults when untouched; 15/15 nodes still construct
+- [x] HeyGen `aspect_ratio` / `resolution` / `expressiveness` accept connections; `str` → `str` is a legal link from the config node
+- [x] HeyGen `aspect_ratio` default is `9:16`, with `auto` still selectable for older workflows
+- [x] Synthetic 1920×1080 clip with 596 px bars → refused, message names bar widths and all three aspect ratios
+- [x] Matching portrait overlay → accepted; near-black noisy content (mean ~9) → accepted, not misread as bars
+- [x] **Regression:** 1080×1920 with a black chair filling the bottom of frame (`0px top / 71px bottom`) → accepted; the real 596/596 pillarbox still refused
+- [ ] **Live:** Ozzy two-pass at an explicit 9:16 composites without a dark rectangle
+
+## 10. Green plates for generated footage (resolved 2026-08-08)
+
+Not a node — a process constraint that governs §4/§7 usage, written up in full at [docs/replica-plate-delivery.md](docs/replica-plate-delivery.md).
+
+A green-screen plate for the Ozzy replica keyed badly: the background flickered and the key was unusable. Three approaches were considered and two were wrong.
+
+- **Wrong: tune the keyer.** The runtime keyer measures `green − max(red, blue)` plus a brightness gate. The plate's green was `RGB(0.7, 152.2, 106.1)` → a dominance margin of **46**, with blue at 106 eating it from the side nobody was watching. Generator flicker was a large fraction of that margin. No threshold recovers it.
+- **Wrong: rebuild the background downstream.** Roto the subject by identity, composite over a synthetic fill. It works, but it is a manual Resolve round trip, and a silhouette matte discards the floor contact shadow that the whole plate exists to preserve. Kept in the doc as recovery-only.
+- **Right: author the green upstream, at `RGB(0, 255, 0)`.** Replace the *original white* background with pure green before the lipsync pass. Dominance margin **255** — 5.5× wider — so the same flicker stops crossing the threshold. Brightness V=255 puts the background at the ceiling, cleanly above any darkened shadow, so the gate preserves reflections. And Replace Color on flat white leaves the reflection as a *darker green*, which is exactly the form the gate wants; the shadow is preserved by construction rather than recovered.
+
+Verified live: a clean key with the floor reflection intact.
+
+Consequences for this library: the `remove_background` / webm-alpha test flagged in §11 is **no longer needed for this pipeline** (kept as a note, since it would still be the cheapest matte source if a future plate can't be authored upstream). Colour-matrix handling in §7's pipe-based nodes is unaffected — the shift was in the generation, not the round trip, confirmed by the user and by a BT.709 YCbCr round trip on the measured green showing zero error in both full and limited range.
+
+## 11. Reference
 
 - As-built reference implementation: [README.md](README.md) and `hyperreal/heygen/avatar_video.py` (input handling, SuccessFailureNode wiring, manifest shape)
 - DO Spaces S3 compatibility: `docs.digitalocean.com/products/spaces/` (verify the current endpoint URL format for the chosen region before hard-coding examples in the README)

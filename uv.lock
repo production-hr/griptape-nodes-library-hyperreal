@@ -500,7 +500,7 @@ dependencies = [
 
 [[package]]
 name = "griptape-nodes-library-hyperreal"
-version = "0.6.0"
+version = "0.9.1"
 source = { editable = "." }
 dependencies = [
     { name = "boto3" },

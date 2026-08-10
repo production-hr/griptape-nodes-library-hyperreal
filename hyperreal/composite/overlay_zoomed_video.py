@@ -33,6 +33,17 @@ DETECT_SAMPLE_FRAMES = 9
 REFINE_SAMPLE_FRAMES = 3
 REFINE_MIN_CONFIDENCE = 0.25
 REFINE_MAX_SHIFT_PX = 40.0
+# Pillarbox/letterbox detection. Deliberately strict: real dark content varies
+# frame to frame and is never quite black, so a bar must be near-zero brightness,
+# near-zero variance, present in every sampled frame, and PAIRED with a bar on
+# the opposite edge (padding is centred; one dark edge is just content).
+BAR_SAMPLE_FRAMES = 5
+BAR_MAX_MEAN = 12.0
+BAR_MAX_STD = 3.0
+BAR_MIN_FRACTION = 0.02
+# A bar wider than this leaves no picture, so stop scanning there. Real pillarboxing
+# of portrait content into 16:9 runs to ~34% a side, well inside the cap.
+BAR_MAX_SIDE_FRACTION = 0.45
 
 
 def _ffmpeg_paths() -> tuple[str, str]:
@@ -324,7 +335,7 @@ class OverlayZoomedVideo(SuccessFailureNode):
 
             base = self._probe(base_path, "base_video")
             over = self._probe(over_path, "overlay_video")
-            self._validate(base, over)
+            self._validate(base_path, over_path, base, over)
 
             placement, notes = self._compute_placement(base_path, over_path, base, over)
             self.parameter_output_values["placement"] = placement
@@ -365,7 +376,10 @@ class OverlayZoomedVideo(SuccessFailureNode):
 
     # -- Validation ----------------------------------------------------------
 
-    def _validate(self, base: dict[str, Any], over: dict[str, Any]) -> None:
+    def _validate(
+        self, base_path: Path, over_path: Path, base: dict[str, Any], over: dict[str, Any]
+    ) -> None:
+        self._check_pillarbox(over_path, over, base)
         if base["frame_count"] != over["frame_count"]:
             raise ValueError(
                 f"base_video has {base['frame_count']} frames but overlay_video has {over['frame_count']} — "
@@ -377,6 +391,111 @@ class OverlayZoomedVideo(SuccessFailureNode):
                 f"base_video is {base['frame_rate']:.3f} fps but overlay_video is {over['frame_rate']:.3f} fps — "
                 "re-render one of them to match."
             )
+
+    def _check_pillarbox(self, path: Path, over: dict[str, Any], base: dict[str, Any]) -> None:
+        """Refuse an overlay whose frame has black bars baked into it.
+
+        A generator asked for the wrong aspect ratio returns the subject letter-
+        or pillarboxed. Those bars are frame content, so this node would scale
+        them down and blend them over the plate — a dark rectangle around the
+        face. Alignment still computes fine, which is what makes it insidious:
+        nothing fails, the render just comes back wrong after both generations
+        have been paid for.
+        """
+        measured = self._measure_bars(path, over)
+        if measured is None:
+            return
+        left, right, top, bottom, content_mean = measured
+        # A pillarbox is dark bars around BRIGHTER content. If what is left between
+        # the bars is just as dark, the frame is simply a dark frame — a night
+        # exterior, a black backdrop — and there is nothing to refuse.
+        if content_mean <= BAR_MAX_MEAN * 2:
+            logger.info(
+                "Skipping the pillarbox check on a uniformly dark overlay (centre mean %.1f).", content_mean
+            )
+            return
+        # Bars come in PAIRS. An encoder padding to a different aspect centres the
+        # picture, so letterboxing is top *and* bottom, pillarboxing left *and*
+        # right. Darkness against one edge only is content — a black chair behind
+        # a head, a shadow at the bottom of frame — and taking the max here is what
+        # made this fire on a perfectly good render (0px top / 71px bottom).
+        horizontal = min(left, right) / max(1, over["width"])
+        vertical = min(top, bottom) / max(1, over["height"])
+        if max(horizontal, vertical) < BAR_MIN_FRACTION:
+            return
+
+        if horizontal >= vertical:
+            kind, detail = "pillarboxed", f"black bars {left}px left / {right}px right"
+            content_aspect = (over["width"] - left - right) / max(1, over["height"])
+        else:
+            kind, detail = "letterboxed", f"black bars {top}px top / {bottom}px bottom"
+            content_aspect = over["width"] / max(1, over["height"] - top - bottom)
+        raise ValueError(
+            f"overlay_video looks {kind}: {over['width']}x{over['height']} with {detail}. Those bars are part "
+            f"of the frame, so they would be blended over the base as a dark rectangle around the face.\n"
+            f"The real content is about {content_aspect:.3f}:1 while the frame is "
+            f"{over['width'] / over['height']:.3f}:1 and the base is "
+            f"{base['width'] / base['height']:.3f}:1.\n"
+            "Re-render the zoomed pass with the aspect ratio set explicitly to match the base — a generator "
+            "left on 'auto' is the usual cause. Wire both passes from one Shot Settings node so they cannot "
+            "disagree."
+        )
+
+    @staticmethod
+    def _measure_bars(path: Path, info: dict[str, Any]) -> tuple[int, int, int, int, float] | None:
+        """Bar widths in px plus the mean brightness of what is left in the middle.
+
+        Strict on purpose: real dark content at the edge of a frame varies between
+        frames and is never quite black, so require near-zero brightness AND near-zero
+        variance AND agreement across every sample. The minimum across samples is
+        taken, so one dark frame cannot manufacture a bar.
+
+        Each side is scanned no further than BAR_MAX_SIDE_FRACTION of the dimension:
+        a bar wider than that would leave no picture, and without the cap a wholly
+        dark frame reports bars covering more than the frame itself.
+        """
+        cap = cv2.VideoCapture(str(path))
+        if not cap.isOpened():
+            return None
+        try:
+            total = max(1, info["frame_count"])
+            measurements: list[tuple[int, int, int, int]] = []
+            centres: list[float] = []
+            for step in range(BAR_SAMPLE_FRAMES):
+                cap.set(cv2.CAP_PROP_POS_FRAMES, min(int(total * (step + 0.5) / BAR_SAMPLE_FRAMES), total - 1))
+                ok, frame = cap.read()
+                if not ok:
+                    continue
+                gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+                height, width = gray.shape[:2]
+                x_limit = max(1, int(width * BAR_MAX_SIDE_FRACTION))
+                y_limit = max(1, int(height * BAR_MAX_SIDE_FRACTION))
+                columns = [gray[:, i] for i in range(width)]
+                rows = [gray[i, :] for i in range(height)]
+                measurements.append((
+                    OverlayZoomedVideo._count_dark(columns, x_limit),
+                    OverlayZoomedVideo._count_dark(reversed(columns), x_limit),
+                    OverlayZoomedVideo._count_dark(rows, y_limit),
+                    OverlayZoomedVideo._count_dark(reversed(rows), y_limit),
+                ))
+                centres.append(float(gray[y_limit:height - y_limit, x_limit:width - x_limit].mean()))
+        finally:
+            cap.release()
+        if not measurements:
+            return None
+        bars = tuple(min(m[i] for m in measurements) for i in range(4))
+        return (*bars, sum(centres) / len(centres))  # type: ignore[return-value]
+
+    @staticmethod
+    def _count_dark(lines: Any, limit: int) -> int:
+        count = 0
+        for line in lines:
+            if count >= limit:
+                break
+            if float(line.mean()) > BAR_MAX_MEAN or float(line.std()) > BAR_MAX_STD:
+                break
+            count += 1
+        return count
 
     # -- Alignment -----------------------------------------------------------
 
