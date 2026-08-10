@@ -174,8 +174,8 @@ class RunComfyScailInfinite(ControlNode):
             )
             ParameterInt(
                 name="timeout_seconds",
-                default_value=1200,
-                tooltip="Maximum seconds to wait for completion.",
+                default_value=6000,
+                tooltip="Maximum seconds to wait for completion (default 6000 = 100 min). On timeout the RunComfy job is cancelled.",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         advanced.ui_options = {"collapsed": True}
@@ -347,7 +347,8 @@ class RunComfyScailInfinite(ControlNode):
         token = self._get_token()
         deployment_id = (self.get_parameter_value("deployment_id") or "").strip()
         poll_interval = max(1, int(self.get_parameter_value("poll_interval") or 5))
-        timeout_seconds = max(10, int(self.get_parameter_value("timeout_seconds") or 1200))
+        timeout_seconds = max(10, int(self.get_parameter_value("timeout_seconds") or 6000))
+        max_poll_failures = 10
 
         headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
         auth = {"Authorization": f"Bearer {token}"}
@@ -384,6 +385,7 @@ class RunComfyScailInfinite(ControlNode):
             # 2) Poll status (cancel-aware)
             deadline = time.time() + timeout_seconds
             last_status = "in_queue"
+            poll_failures = 0
             while time.time() < deadline:
                 if await self._sleep_cancellable(client, poll_interval, cancel_url, auth):
                     self._fail(status="cancelled", detail="Cancelled by user; RunComfy job cancellation requested.")
@@ -391,11 +393,38 @@ class RunComfyScailInfinite(ControlNode):
                 try:
                     s = await client.get(status_url, headers=auth, timeout=60)
                 except httpx.HTTPError as exc:
-                    logger.warning("%s status poll error (will retry): %s", self.name, exc)
+                    poll_failures += 1
+                    logger.warning(
+                        "%s status poll error %d/%d (will retry): %s", self.name, poll_failures, max_poll_failures, exc
+                    )
+                    if poll_failures >= max_poll_failures:
+                        await self._cancel_job(client, cancel_url, auth)
+                        self._fail(
+                            status="poll_failed",
+                            detail=f"Status polling failed {poll_failures} times in a row ({exc}); cancelled the RunComfy job.",
+                        )
+                        return
                     continue
                 if s.status_code >= 400:
-                    logger.warning("%s status HTTP %s (will retry): %s", self.name, s.status_code, s.text[:200])
+                    poll_failures += 1
+                    logger.warning(
+                        "%s status HTTP %s %d/%d (will retry): %s",
+                        self.name,
+                        s.status_code,
+                        poll_failures,
+                        max_poll_failures,
+                        s.text[:200],
+                    )
+                    if poll_failures >= max_poll_failures:
+                        await self._cancel_job(client, cancel_url, auth)
+                        self._fail(
+                            status="poll_failed",
+                            detail=f"Status endpoint returned errors {poll_failures} times in a row "
+                            f"(last HTTP {s.status_code}); cancelled the RunComfy job.",
+                        )
+                        return
                     continue
+                poll_failures = 0
                 sjson = s.json()
                 last_status = str(sjson.get("status", "")).lower()
                 logger.info("%s status: %s", self.name, last_status or "<none>")
@@ -405,8 +434,10 @@ class RunComfyScailInfinite(ControlNode):
                     self._fail(status=last_status, detail=json.dumps(sjson)[:1000])
                     return
             else:
+                await self._cancel_job(client, cancel_url, auth)
                 self._fail(
-                    status="timeout", detail=f"No terminal status within {timeout_seconds}s (last={last_status})."
+                    status="timeout",
+                    detail=f"No terminal status within {timeout_seconds}s (last={last_status}); cancelled the RunComfy job.",
                 )
                 return
 
