@@ -13,7 +13,8 @@
                     "DO_SPACES_KEY",
                     "DO_SPACES_SECRET",
                     "DO_SPACES_REGION",
-                    "DO_SPACES_ENDPOINT"
+                    "DO_SPACES_ENDPOINT",
+                    "RUNCOMFY_TOKEN"
                 ]
             }
         }
@@ -120,6 +121,14 @@
                 "title": "Spaces",
                 "description": "DigitalOcean Spaces storage utilities",
                 "icon": "Cloud"
+            }
+        },
+        {
+            "video/comfyui": {
+                "color": "border-orange-500",
+                "title": "ComfyUI",
+                "description": "Serverless ComfyUI workflows run via the RunComfy API",
+                "icon": "Video"
             }
         }
     ],
@@ -257,6 +266,15 @@
                 "category": "storage/spaces",
                 "description": "Upload a media artifact to a DigitalOcean Spaces bucket and return its public URL.",
                 "display_name": "Upload to Spaces"
+            }
+        },
+        {
+            "class_name": "RunComfyScailInfinite",
+            "file_path": "ComfyUI/scail_infinite.py",
+            "metadata": {
+                "category": "video/comfyui",
+                "description": "Run the SCAIL Infinite ComfyUI workflow on RunComfy: image + prompts + motion video, optional LoRA and size, cancellable polling, returns the output video URL.",
+                "display_name": "RunComfy SCAIL Infinite"
             }
         }
     ]
