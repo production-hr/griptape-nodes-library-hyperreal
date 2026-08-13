@@ -13,7 +13,8 @@ HYPERREAL NODES
 ├─ IMAGE
 │  ├─ TOPAZ             Topaz Image Upscale
 │  ├─ FACE PREP         Zoom To Head
-│  └─ WAVESPEED         WaveSpeed Image Edit
+│  ├─ WAVESPEED         WaveSpeed Image Edit
+│  └─ MATTE             Extract Image Matte
 ├─ CONFIG
 │  └─ SHOT              Shot Settings
 ├─ STORAGE
@@ -160,6 +161,21 @@ Outputs: `image` (ImageUrlArtifact), `prediction_id`.
 | `seed` | int | -1 = random |
 
 Outputs: `video` (InfiniteTalk) / `output_video` (V2V), `prediction_id`.
+
+### Extract Image Matte (`ExtractImageMatte`)
+
+Still image → soft-alpha matte + RGBA cutout, via [rembg](https://github.com/danielgatis/rembg) with BiRefNet-class models. **Local inference — no API, no secrets.** Built for pulling mattes off the gray-backdrop AI masters (hair edges, fuzzy knits) for Resolve/Nuke comp or the Composite nodes.
+
+| Parameter | Type | Notes |
+|---|---|---|
+| `image` | ImageArtifact / ImageUrlArtifact | Subject on an even studio backdrop mattes best |
+| `model` | birefnet-portrait / birefnet-general / isnet-general-use / u2net | Portrait (default) has the softest hair edges for people; general for objects; the other two are lighter and coarser. **First use of each model downloads its weights once** to the user cache |
+| `alpha_matting` | bool | Extra edge-refinement pass; BiRefNet rarely needs it — try it if fine hair comes back hard |
+| `output_directory` | str | Optional folder to also save both outputs into (supports `{project_dir}/...`) |
+
+Outputs: `cutout_image` (RGBA PNG) and `matte_image` (**white = subject** — same polarity as the Composite nodes and Resolve/Nuke defaults). `result_details` reports the subject's frame coverage and warns when the matte comes back nearly empty or nearly full-frame (the usual sign of a wrong model choice). Model sessions are cached per engine process, so the first run per model is the slow one.
+
+This is the *soft-edge* complement to SAM-style segmentation: SAM gives hard-edged per-object masks (good for isolation/garbage mattes, and video); this gives graded alpha (good for extraction composites). Different jobs.
 
 ### Face Prep nodes (`DetectHeadRegion`, `CropToRegion`, `CompositeRegionBack`)
 
@@ -424,6 +440,16 @@ Run against a 720×1280 generated clip with a dark-clothed subject on green:
 - [ ] `public=false` produces an object that is *not* publicly fetchable
 - [ ] Bad credentials produce a readable node error naming the problem
 - [ ] Teammates only needed an engine restart — no new library install
+
+## Verification — Extract Image Matte (pending live run)
+
+- [ ] Library re-registers with the new `rembg[cpu]` dependency installed; existing nodes still load
+- [ ] Node appears under **HyperReal Nodes → Image → Matte**
+- [ ] A gray-backdrop full-body master produces a clean cutout and a white-on-subject matte with soft hair edges (birefnet-portrait)
+- [ ] The matte drives a downstream composite correctly (polarity: white = keep)
+- [ ] Coverage warning fires on a wrong-model run (nearly-empty or nearly-full matte)
+- [ ] First-run model download completes and is reported readably; second run is fast (session cache)
+- [ ] `output_directory` copies both files with collision suffixes
 
 ## Development
 

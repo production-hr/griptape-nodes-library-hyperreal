@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.10.0",
+        "library_version": "0.11.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -38,7 +38,8 @@
                 "boto3",
                 "opencv-python",
                 "numpy",
-                "static-ffmpeg>=2.8"
+                "static-ffmpeg>=2.8",
+                "rembg[cpu]>=2.0.60"
             ]
         }
     },
@@ -121,6 +122,14 @@
                 "title": "Spaces",
                 "description": "DigitalOcean Spaces storage utilities",
                 "icon": "Cloud"
+            }
+        },
+        {
+            "image/matte": {
+                "color": "border-teal-500",
+                "title": "Matte",
+                "description": "Soft-alpha matte extraction from stills, locally via rembg/BiRefNet",
+                "icon": "Image"
             }
         },
         {
@@ -266,6 +275,15 @@
                 "category": "storage/spaces",
                 "description": "Upload a media artifact to a DigitalOcean Spaces bucket and return its public URL.",
                 "display_name": "Upload to Spaces"
+            }
+        },
+        {
+            "class_name": "ExtractImageMatte",
+            "file_path": "matte/extract_image_matte.py",
+            "metadata": {
+                "category": "image/matte",
+                "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
+                "display_name": "Extract Image Matte"
             }
         },
         {
