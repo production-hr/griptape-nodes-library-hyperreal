@@ -12,8 +12,9 @@ HYPERREAL NODES
 │  └─ COMPOSITE         Composite Over Background · Overlay Zoomed Video
 ├─ IMAGE
 │  ├─ TOPAZ             Topaz Image Upscale
-│  ├─ FACE PREP         Zoom To Head
+│  ├─ FACE PREP         Zoom To Head · Composite Face Back
 │  ├─ WAVESPEED         WaveSpeed Image Edit
+│  ├─ COMPOSITE         Composite Bottom Band
 │  └─ MATTE             Extract Image Matte
 ├─ CONFIG
 │  └─ SHOT              Shot Settings
@@ -263,6 +264,34 @@ Outputs `composited_video`, an `alignment_preview` still (check this before comm
 
 **How the alignment is derived**, since the choice was measured rather than assumed: scale comes from the **face box diagonal**, not eye separation — on a known-scale round trip the diagonal landed within 0.5% while inter-ocular distance was 7.5% out, because a longer baseline absorbs detector jitter. Position anchors on the eye midpoint. A phase-correlation pass then removes the residual couple of pixels. Measured end to end against a synthetic 2× zoom whose correct placement was known exactly: **scale within 0.2%, position exact, residual shift 0.3px**.
 
+### Composite Face Back + Composite Bottom Band — still-image comp-backs
+
+Two image-domain nodes for the *generate-a-piece, comp-it-back* pattern, graduated from the sandbox after production use on the Stan Lee and Whitney replica refreshes. Both are pure PIL, local, no secrets.
+
+**Composite Face Back** (`CompositeFaceBack`, image/faceprep) pastes an enhanced face crop back onto the full-body source. Consumes the `crop_region` from the Zoom To Head that made the crop. The critical feature is **auto-alignment**: generative editors do not preserve composition (measured: a face re-rendered at 42% of the crop came back at 72% of the canvas), so wire a second Zoom To Head — run on the *enhanced* image — into `enhanced_face_region` and the paste derives scale from the **face-box diagonal ratio** and position from the face centers, the same anchors Overlay Zoomed Video measured best.
+
+| Parameter | Notes |
+|---|---|
+| `base_image` / `face_image` / `crop_region` | Original, enhanced crop, and the region from the original Zoom To Head |
+| `enhanced_face_region` | Optional but strongly recommended — detection of the enhanced image; without it the canvas pastes box-to-box as-is |
+| `edge_shape` / `feather_px` / `matte_inset_px` | rounded_rect default, 24px feather, 8px erode |
+| `extend_top_coverage` | When the generator zoomed in, the aligned insert can start *below* the original hair crown; this extends it upward with backdrop replicated from its own top edge so the original crown is buried. Assumes clean backdrop above the head — on by default |
+| `scale_adjust` / `offset_x` / `offset_y` | Manual nudges on top of the auto result |
+| `color_match` | Per-channel mean/contrast transfer, on by default |
+
+Outputs `composited_image` + full-frame `matte_preview`. **Detect the enhanced face on a downscaled copy (~640px wide)** — YuNet's anchors top out around ~500px faces, and detection on a full-resolution 4K portrait returns a garbage box (measured: a 456px "face" on an 1800px head). A RescaleImage node in front of the detector is the pattern; the node rescales detection coordinates by the detector's reported source size automatically. Residual scale bias between the two detections (different face-to-frame regimes) is what `scale_adjust` is for (~1.05-1.10 typical).
+
+**Composite Bottom Band** (`CompositeBottomBand`, image/composite) blends the bottom fraction of a **full-frame** AI edit over the original — built for floor treatments (reflections, shadows, floor swaps). The design inversion that makes it robust: don't send the generator a crop to edit (cropped re-renders drift); let it edit the whole frame — it needs to see the subject it is mirroring anyway — then take back only the band below the seam. Everything above stays guaranteed-original.
+
+| Parameter | Notes |
+|---|---|
+| `base_image` / `edited_image` | Original and the full-frame edit (resized to match, so the band is pixel-aligned by construction) |
+| `band_fraction` | Height fraction measured from the bottom (default 0.25); set the seam just above the shoes and check `matte_preview` |
+| `feather_px` | Linear fade along the TOP seam only — the other three edges are image borders, where feathering would fade the edit back out |
+| `color_match` | **Off by default, deliberately**: the band intentionally differs from the original (it contains the new reflection); matching would dim exactly what you added |
+
+Outputs `composited_image`, `matte_preview`, and `band_region` JSON.
+
 ### Composite Over Background (`CompositeOverBackground`)
 
 Subject video over a background still or video, with alpha from one of four sources. Local ffmpeg + OpenCV — no API, no secrets. One ffmpeg invocation produces both outputs.
@@ -440,6 +469,17 @@ Run against a 720×1280 generated clip with a dark-clothed subject on green:
 - [ ] `public=false` produces an object that is *not* publicly fetchable
 - [ ] Bad credentials produce a readable node error naming the problem
 - [ ] Teammates only needed an engine restart — no new library install
+
+## Verification — Composite Face Back + Composite Bottom Band (proven via sandbox 2026-08-10..12; library registration pending)
+
+Both nodes ran in production through the sandbox before graduation:
+
+- [x] Face Back: full enhance round trips on Stan Lee and Whitney masters (Zoom To Head → NB2 enhance → detect → composite), including auto-align correcting a measured 1.7x generator drift and top-coverage extension burying the original hair crown
+- [x] Face Back: dimension validation rejects a region from a different image, naming both sizes
+- [x] Bottom Band: floor-reflection composite delivered for a Proto hologram deliverable; seam invisible at default feather
+- [x] Batch behavior: failure paths produce readable errors, not stack traces
+- [ ] Both nodes appear under HyperReal Nodes after library refresh (Image → Face Prep / Composite); existing nodes still load
+- [ ] A workflow built against the library copies runs end to end (sandbox copies removed to avoid duplicate class registration)
 
 ## Verification — Extract Image Matte (pending live run)
 

@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.11.0",
+        "library_version": "0.12.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -39,7 +39,8 @@
                 "opencv-python",
                 "numpy",
                 "static-ffmpeg>=2.8",
-                "rembg[cpu]>=2.0.60"
+                "rembg[cpu]>=2.0.60",
+                "pillow"
             ]
         }
     },
@@ -105,6 +106,14 @@
                 "color": "border-cyan-500",
                 "title": "Composite",
                 "description": "Chroma-key and matte compositing over background stills or videos",
+                "icon": "Layers"
+            }
+        },
+        {
+            "image/composite": {
+                "color": "border-cyan-500",
+                "title": "Composite",
+                "description": "Still-image compositing over the original plate",
                 "icon": "Layers"
             }
         },
@@ -275,6 +284,24 @@
                 "category": "storage/spaces",
                 "description": "Upload a media artifact to a DigitalOcean Spaces bucket and return its public URL.",
                 "display_name": "Upload to Spaces"
+            }
+        },
+        {
+            "class_name": "CompositeFaceBack",
+            "file_path": "faceprep/composite_face_back.py",
+            "metadata": {
+                "category": "image/faceprep",
+                "description": "Paste an enhanced face crop back onto the full-body source image, feathered, color-matched, and auto-aligned by face when a detection of the enhanced image is wired in.",
+                "display_name": "Composite Face Back"
+            }
+        },
+        {
+            "class_name": "CompositeBottomBand",
+            "file_path": "composite/composite_bottom_band.py",
+            "metadata": {
+                "category": "image/composite",
+                "description": "Blend the bottom band of a full-frame AI edit (e.g. an added floor reflection) over the original image, feathered only along the top seam.",
+                "display_name": "Composite Bottom Band"
             }
         },
         {
