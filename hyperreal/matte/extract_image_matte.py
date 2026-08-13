@@ -130,7 +130,9 @@ class ExtractImageMatte(SuccessFailureNode):
                     "dependencies are installed, then run again."
                 ) from e
 
-            data = self._artifact_to_bytes(self.parameter_values.get("image"), "image")
+            image_value = self.parameter_values.get("image")
+            data = self._artifact_to_bytes(image_value, "image")
+            source_stem = self._source_basename(image_value)
             try:
                 source = Image.open(BytesIO(data)).convert("RGB")
             except Exception as e:
@@ -168,9 +170,16 @@ class ExtractImageMatte(SuccessFailureNode):
                     "the background; try a different model"
                 )
 
-            self.parameter_output_values["cutout_image"] = self._publish(cutout, "matte_cutout", copy_out=True)
+            # Batch-friendly naming: when the source has a usable name (file path,
+            # URL, or named artifact), directory copies become <name>_cutout.png /
+            # <name>_matte.png so a folder of results stays traceable to its inputs.
+            cutout_copy = f"{source_stem}_cutout.png" if source_stem else None
+            matte_copy = f"{source_stem}_matte.png" if source_stem else None
+            self.parameter_output_values["cutout_image"] = self._publish(
+                cutout, "matte_cutout", copy_out=True, copy_filename=cutout_copy
+            )
             self.parameter_output_values["matte_image"] = self._publish(
-                matte.convert("RGB"), "matte", copy_out=True
+                matte.convert("RGB"), "matte", copy_out=True, copy_filename=matte_copy
             )
 
             saved_note = "\nSaved files:\n" + "\n".join(self._saved_files) if self._saved_files else ""
@@ -188,15 +197,29 @@ class ExtractImageMatte(SuccessFailureNode):
 
     # -- Output --------------------------------------------------------------
 
-    def _publish(self, image: Image.Image, label: str, *, copy_out: bool = False) -> ImageUrlArtifact:
+    def _publish(
+        self, image: Image.Image, label: str, *, copy_out: bool = False, copy_filename: str | None = None
+    ) -> ImageUrlArtifact:
         buffer = BytesIO()
         image.save(buffer, format="PNG")
         data = buffer.getvalue()
         filename = f"{label}_{uuid.uuid4().hex[:8]}.png"
         saved_url = GriptapeNodes.StaticFilesManager().save_static_file(data, filename)
         if copy_out:
-            self._save_copy_to_output_directory(data, filename)
+            self._save_copy_to_output_directory(data, copy_filename or filename)
         return ImageUrlArtifact(value=saved_url, name=filename)
+
+    def _source_basename(self, artifact: Any) -> str | None:
+        """Best-effort stem of the input's filename, sanitized, for output naming."""
+        candidates = [getattr(artifact, "name", None), getattr(artifact, "value", artifact)]
+        for candidate in candidates:
+            if not isinstance(candidate, str) or not candidate or candidate.startswith("data:"):
+                continue
+            stem = Path(candidate.partition("?")[0]).stem
+            stem = "".join(c if (c.isalnum() or c in "-_.") else "_" for c in stem).strip("._")
+            if stem:
+                return stem[:80]
+        return None
 
     def _save_copy_to_output_directory(self, data: bytes, filename: str) -> None:
         """Optionally write outputs into the user-chosen folder; failures are reported, not fatal."""
