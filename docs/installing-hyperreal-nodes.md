@@ -4,9 +4,22 @@ Step-by-step setup for teammates. When you're done, Griptape Nodes Desktop will 
 
 Nothing in these steps requires editing a file path in any config file — the only path involved is where *you* choose to clone the repo, and you pick it once in a file dialog.
 
-**Requirements:** Griptape Nodes Desktop with engine version **0.86.0 or newer**, `git` installed, and access to the `production-hr/griptape-nodes-library-hyperreal` GitHub repo (you should already have this).
+**Requirements:** Griptape Nodes Desktop with engine version **0.86.0 or newer**, `git` installed, and access to the `production-hr/griptape-nodes-library-hyperreal` GitHub repo (see below if you don't have it yet).
 
 ---
+
+## 0. Repo access (first time only)
+
+The repo is **private**, so two things must be true before the clone in step 1 works:
+
+**Your GitHub account needs permission.** Ask Tim to add your *personal* GitHub username as a collaborator (repo → Settings → Collaborators → Add people), then accept the invite that lands in your email. Read access is enough for installing and pulling updates; you only need Write if you'll push node changes. Note that each private repo grants access separately — being a collaborator on this repo does not carry over to `hr-griptape-workflows` or vice versa, so ask for both if you'll use the shared workflows too. (Never use the shared `production-hr` account for your own machine.)
+
+**Your machine needs to authenticate to GitHub.** GitHub doesn't accept account passwords for git over HTTPS, but you almost certainly won't need to create a token manually:
+
+- **Easiest (Windows default):** Git for Windows ships with *Git Credential Manager*. The first time you `git clone`, a browser window pops up asking you to sign in to GitHub and authorize — done. Credentials are stored, and every future pull just works.
+- **Alternative:** GitHub CLI — `gh auth login` once, then clone normally.
+- **Locked-down machine (no browser popup):** create a fine-grained Personal Access Token in your GitHub settings, scoped to just this repo with read access, and paste it as the password when git prompts. Tokens expire, so prefer the options above.
+- **SSH keys** also work if that's your preference — use the `git@github.com:production-hr/...` URL form instead.
 
 ## 1. Clone the repo
 
