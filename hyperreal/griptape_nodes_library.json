@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.13.6",
+        "library_version": "0.14.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -147,6 +147,14 @@
                 "title": "Matte",
                 "description": "Soft-alpha matte extraction from stills, locally via rembg/BiRefNet",
                 "icon": "Image"
+            }
+        },
+        {
+            "video/matte": {
+                "color": "border-teal-500",
+                "title": "Matte",
+                "description": "Video matte refinement — hard segmentation masks to soft edge-accurate alpha",
+                "icon": "Video"
             }
         },
         {
@@ -319,6 +327,15 @@
                 "category": "image/matte",
                 "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
                 "display_name": "Extract Image Matte"
+            }
+        },
+        {
+            "class_name": "RefineVideoMatte",
+            "file_path": "matte/refine_video_matte.py",
+            "metadata": {
+                "category": "video/matte",
+                "description": "Refine a hard matte video (SAM3, keyer, Magic Mask export) into a soft edge-accurate alpha using the RGB clip as guide — guided-filter edge refinement, no extra dependencies.",
+                "display_name": "Refine Video Matte"
             }
         },
         {

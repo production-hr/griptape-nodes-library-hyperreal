@@ -178,6 +178,22 @@ Outputs: `cutout_image` (RGBA PNG) and `matte_image` (**white = subject** — sa
 
 This is the *soft-edge* complement to SAM-style segmentation: SAM gives hard-edged per-object masks (good for isolation/garbage mattes, and video); this gives graded alpha (good for extraction composites). Different jobs.
 
+### Refine Video Matte (`RefineVideoMatte`)
+
+Turns a hard, jagged matte video into a soft edge-accurate alpha, guided by the RGB clip it came
+from. Built as the companion to SAM3-style segmentation: SAM3's masks are temporally rock solid
+(no Magic Mask popping) but hard-binary and blocky — this node keeps the stability and fixes the
+edges. Works on any white-on-black matte source (keyer output, Magic Mask export, RMBG).
+
+Guided-filter (He et al.) implemented with plain OpenCV box filters — **no new dependencies**.
+Parameters: `radius_px` (refinement band, default 8), `edge_softness` (guided-filter eps),
+`matte_shift_px` (choke/grow before refining), `in_black`/`in_white` alpha levels, optional
+`output_directory`. Matte and RGB must be frame-locked twins (warns on count mismatch, refines the
+overlap). Output is near-lossless (CRF 10).
+
+Verified offline: synthetic 8px-blocky matte against a soft-edged moving subject — edge-band error
+vs ground-truth alpha nearly halved, refined edge follows the RGB contour.
+
 ### Face Prep nodes (`DetectHeadRegion`, `CropToRegion`, `CompositeRegionBack`)
 
 Three local-processing nodes (OpenCV + ffmpeg — **no API, no secrets**) that bracket an external face-swap step. The point is resolution: swap against a 512–1024 px head crop instead of a head that occupies 15% of a 1080p frame.
