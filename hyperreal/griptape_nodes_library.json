@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.12.0",
+        "library_version": "0.13.6",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -98,6 +98,14 @@
                 "color": "border-amber-500",
                 "title": "Face Prep",
                 "description": "Head detection, crop, and paste-back nodes bracketing an external face-swap step",
+                "icon": "Video"
+            }
+        },
+        {
+            "video/figureprep": {
+                "color": "border-amber-500",
+                "title": "Figure Prep",
+                "description": "Full-figure tracking, panning crop, and wide-frame repositioning for character-swap prep",
                 "icon": "Video"
             }
         },
@@ -311,6 +319,24 @@
                 "category": "image/matte",
                 "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
                 "display_name": "Extract Image Matte"
+            }
+        },
+        {
+            "class_name": "DetectFigureTrack",
+            "file_path": "figureprep/detect_figure_track.py",
+            "metadata": {
+                "category": "video/figureprep",
+                "description": "Track a dancer/figure on a chroma plate and emit a full-height panning crop region (same region schema as Detect Head Region).",
+                "display_name": "Detect Figure Track"
+            }
+        },
+        {
+            "class_name": "RepositionTrackedCrop",
+            "file_path": "figureprep/reposition_tracked_crop.py",
+            "metadata": {
+                "category": "video/figureprep",
+                "description": "Render a crop-space video (generated character or its matte) back into wide-frame position over a flat background, using the recorded track.",
+                "display_name": "Reposition Tracked Crop"
             }
         },
         {

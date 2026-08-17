@@ -94,6 +94,37 @@ then in Griptape use **Refresh Libraries** (or restart). Rule of thumb:
 - **Node code changed** → Refresh Libraries is enough.
 - **A new secret was added** to the library → add the key, then **restart the engine**.
 
+## Optional: drive Griptape from Claude Code (MCP)
+
+The Griptape engine hosts an MCP server at `http://localhost:8125/mcp/` whenever the Desktop
+app is running. To let Claude Code build and run workflows for you:
+
+1. In the parent folder you open Claude Code in (the one *containing* the cloned repos — this
+   file is not part of any repo, so create it by hand), add `.mcp.json`:
+
+   ```json
+   {
+     "mcpServers": {
+       "griptape-nodes": {
+         "type": "streamable-http",
+         "url": "http://localhost:8125/mcp/"
+       }
+     }
+   }
+   ```
+
+2. Start Griptape Desktop, then open Claude Code in that folder and approve the
+   `griptape-nodes` server when prompted. Verify with `/mcp`.
+
+Gotchas:
+- The MCP server lives inside the engine — if the endpoint doesn't respond, Griptape Desktop
+  isn't running.
+- After restarting Griptape, the extension can hold a dead connection: run
+  **Developer: Reload Window** (VS Code command palette) to reconnect.
+- Reopened workflows restore nodes as already-resolved with their saved outputs; changing a
+  parameter to the *same* value does not force a re-run — actually change a value (or the
+  input file) to make a node recompute.
+
 ## Troubleshooting
 
 - **Library doesn't appear after adding** — confirm you selected `hyperreal/griptape_nodes_library.json` (inside the `hyperreal` subfolder), not a file at the repo root.

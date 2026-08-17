@@ -208,6 +208,20 @@ Load Video → Detect Head Region → Crop To Region → Topaz Video Upscale →
 
 First run of any of these downloads the ffmpeg binaries once (via `static-ffmpeg`).
 
+### Figure Prep nodes (`DetectFigureTrack`, `RepositionTrackedCrop`)
+
+The full-body sibling of Face Prep, built for character-replacement workflows (Wan SCAIL et al.) where a wide performance plate leaves the character low-res. Track the whole figure, crop a tight panning window for the generator, then place the result back into wide-frame coordinates. Local OpenCV + ffmpeg — **no API, no secrets**. Both emit/consume the same `hyperreal.head_region/1` region contract as Face Prep, so **Crop To Region is reused as-is** for the middle step (its tracked path now handles non-square boxes).
+
+```
+Load Video → Detect Figure Track → Crop To Region → [SCAIL / external generator] → Reposition Tracked Crop → Save Video
+                                                                  └→ (optional) SAM3 Segment → Reposition Tracked Crop (matte)
+```
+
+- **Detect Figure Track** — no ML: the figure is "whatever is not the backdrop, in front of the backdrop". The screen itself bounds the search on **all four sides** (validated against a real location plate): stage columns from backdrop coverage exclude the room around the screen (light stands, doors, walls); a row band from robust percentiles of the screen's first/last green row excludes the wall above a sagging cloth top and the floor in front; a strict in-band coverage pass drops the cloth's own shadowed drape edges; and only the contiguous column-run with the greatest total mass is kept — limbs attach to the body, so the figure is one run, and disconnected blobs (sandbags, shadowed cloth corners, a light-stand pole in front of the screen) are discarded wherever they sit; mass beats tallest-column so a thin full-height obstruction can't out-rank a motion-blurred dancer. Flat/low-saturation plates may need `key_threshold` lowered (e.g. 20; the default 40 suits well-lit saturated screens). What remains is per-column chroma coverage (`key_color` green/blue, `key_threshold`) with the **median column baseline subtracted** — residual spill does not inflate the box; arms and leg kicks do, by design. One clip-wide window: full plate height, width = widest silhouette + `margin_px` each side, snapped up to `snap_multiple` (16). The window pans on a `smoothing_window`-frame moving average (lazy camera, default 25) with per-frame clamping so the silhouette never exits — smooth-and-clamp runs multiple passes so the clamp can't re-introduce a jerk. `box_mode` auto/static/tracked as in Detect Head Region. Outputs: `region`, flat `x`/`y`/`width`/`height`, `preview_video` with the panning window drawn on. Warns when the figure touches the plate's own left/right edge (silhouette cut off at the source).
+- **Reposition Tracked Crop** — the inverse of Crop To Region for pipelines that do **not** paste back onto the plate (generators repaint the background, and finishing happens in Resolve/Nuke anyway). Takes any crop-space video — the generated character clip **or its matte** — plus the region, and renders a full-frame video with the crop placed at each frame's offset over a flat `background` (black default; black padding is exactly what a matte wants). `output_scale` renders the canvas at a multiple of the plate size — **match it to the generator's upsample and the clip lands 1:1 with zero resampling** (e.g. a 640×1080 crop generated at 1280×2160, repositioned at 2.0, produces 4K UHD keeping every generated pixel — no downscale-then-Topaz round trip). Mismatched input dims are scaled to fit (AREA down / Lanczos4 up), so a generator returning odd dimensions never breaks alignment. Warns on frame-count mismatch against the track. CRF 12, `yuv420p`/`yuv444p`, optional `output_directory` copy.
+
+Matte sources are swappable by design: Resolve Magic Mask on the repositioned clip (fast, interactive) or SAM3 in-pipeline on the generated crop (unattended batch), both land in the same comp.
+
 ### Shot Settings (`ShotSettings`)
 
 One node holding the values several nodes in a shot must **agree** on. A `DataNode`, so it has no control wiring — it resolves as a dependency of whatever reads it.
@@ -490,6 +504,16 @@ Both nodes ran in production through the sandbox before graduation:
 - [ ] Coverage warning fires on a wrong-model run (nearly-empty or nearly-full matte)
 - [ ] First-run model download completes and is reported readably; second run is fast (session cache)
 - [ ] `output_directory` copies both files with collision suffixes
+
+## Verification — Figure Prep nodes (pending live run)
+
+- [ ] Library refreshes at v0.13.0; both nodes appear under **HyperReal Nodes → Video → Figure Prep**
+- [ ] Detect Figure Track on a greenscreen dance plate: `preview_video` shows a full-height window smoothly following the dancer, never clipping arms/leg kicks, not fooled by the floor strip
+- [ ] Crop To Region (existing node) accepts the region and produces the non-square panning crop
+- [ ] Round-trip sanity: feed the crop straight back into Reposition Tracked Crop — result should overlay the plate's figure positions exactly
+- [ ] Reposition Tracked Crop with a deliberately resized input (e.g. crop upscaled 2x) still lands in the correct position
+- [ ] SCAIL output through Reposition: character moves across the wide frame where the dancer was
+- [ ] Frame-count mismatch warning fires when trimming the crop before repositioning
 
 ## Development
 

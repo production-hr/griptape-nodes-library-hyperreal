@@ -9,6 +9,7 @@ import uuid
 from pathlib import Path
 from typing import Any
 
+import cv2
 import numpy as np
 import requests
 from griptape.artifacts.video_url_artifact import VideoUrlArtifact
@@ -22,7 +23,13 @@ logger = logging.getLogger("griptape_nodes")
 DOWNLOAD_TIMEOUT_SECONDS = 600
 REGION_SCHEMA = "hyperreal.head_region/1"
 PIX_FMTS = ["yuv420p", "yuv444p"]
-AUDIO_SOURCES = ["plate", "silent", "none"]
+BACKGROUNDS = ["black", "gray", "white", "green"]
+BACKGROUND_BGR = {
+    "black": (0, 0, 0),
+    "gray": (128, 128, 128),
+    "white": (255, 255, 255),
+    "green": (0, 255, 0),
+}
 
 
 def _ffmpeg_paths() -> tuple[str, str]:
@@ -36,8 +43,7 @@ def _encoder_color_args(path: Path) -> list[str]:
     """Keep the source's colour matrix across a rawvideo round trip.
 
     Decoding to bgr24 uses the source's tagged matrix, but encoding raw frames
-    back defaults to BT.601. On BT.709 source that shifts every pixel, touched or
-    not — measured on a saturated plate, green 160 -> 142 and red clipped to 0.
+    back defaults to BT.601, which shifts colour on BT.709 source.
     """
     _, ffprobe = _ffmpeg_paths()
     result = subprocess.run(
@@ -68,23 +74,29 @@ def _parse_region(value: Any) -> dict:
     if isinstance(value, str):
         value = json.loads(value)
     if not isinstance(value, dict) or value.get("schema") != REGION_SCHEMA:
-        raise ValueError(f"region input is not a {REGION_SCHEMA} dict (connect Detect Head Region's output).")
+        raise ValueError(
+            f"region input is not a {REGION_SCHEMA} dict "
+            "(connect Detect Figure Track's or Crop To Region's region output)."
+        )
     return value
 
 
-class CropToRegion(SuccessFailureNode):
-    """Cut a detected region out of a plate video as a clip for swap prep.
+class RepositionTrackedCrop(SuccessFailureNode):
+    """Place a crop-space video back into wide-frame coordinates over a flat background.
 
-    Consumes the region dict from Detect Head Region (square head box) or
-    Detect Figure Track (full-height panning window) alike. Integer offsets
-    make the crop a pure pixel copy — no resampling, nothing to soften the
-    subject before the swap sees it.
+    The inverse of Crop To Region for pipelines that do NOT paste back onto the
+    plate: feed it the generated character video (or its matte — black padding is
+    exactly what a matte wants) plus the region dict, and it renders a full-frame
+    video with the subject moving exactly where the tracked figure was. Finish in
+    Resolve/Nuke over any background. Input is scaled to the recorded crop size
+    first, so a generator returning different dimensions never breaks alignment.
     """
 
     def __init__(self, name: str, metadata: dict[Any, Any] | None = None, **_: Any) -> None:
         node_metadata = {
-            "category": "video/faceprep",
-            "description": "Crop the detected head region out of a video as a square clip (swap intermediate).",
+            "category": "video/figureprep",
+            "description": "Render a crop-space video (generated character or matte) back into wide-frame "
+            "position over a flat background, using the recorded track.",
         }
         if metadata:
             node_metadata.update(metadata)
@@ -95,7 +107,7 @@ class CropToRegion(SuccessFailureNode):
                 name="video",
                 input_types=["VideoUrlArtifact"],
                 type="VideoUrlArtifact",
-                tooltip="The plate video (same one Detect Head Region analyzed).",
+                tooltip="Crop-space video: the generated character clip, or its matte.",
                 allowed_modes={ParameterMode.INPUT},
             )
         )
@@ -104,8 +116,31 @@ class CropToRegion(SuccessFailureNode):
                 name="region",
                 input_types=["json"],
                 type="json",
-                tooltip="hyperreal.head_region/1 dict from Detect Head Region.",
+                tooltip="Region dict from Detect Figure Track (or Detect Head Region).",
                 allowed_modes={ParameterMode.INPUT},
+            )
+        )
+        self.add_parameter(
+            Parameter(
+                name="output_scale",
+                input_types=["float"],
+                type="float",
+                default_value=1.0,
+                tooltip="Render the canvas at this multiple of the plate size (2.0 = 4K UHD from an HD track). "
+                "Generate at crop size x this scale and the clip lands 1:1 with no resampling — "
+                "e.g. a 640x1080 crop generated at 1280x2160, repositioned at 2.0, keeps every generated pixel.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            )
+        )
+        self.add_parameter(
+            Parameter(
+                name="background",
+                type="str",
+                default_value="black",
+                tooltip="Flat fill outside the tracked window. black is correct for mattes and for "
+                "comp sources you will matte in Resolve.",
+                allowed_modes={ParameterMode.PROPERTY},
+                traits={Options(choices=BACKGROUNDS)},
             )
         )
         self.add_parameter(
@@ -114,7 +149,7 @@ class CropToRegion(SuccessFailureNode):
                 input_types=["int"],
                 type="int",
                 default_value=12,
-                tooltip="x264 CRF. 12 is near-lossless on purpose — this is a swap intermediate, not a deliverable.",
+                tooltip="x264 CRF. 12 is near-lossless on purpose — this is a comp source, not a deliverable.",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )
@@ -123,22 +158,9 @@ class CropToRegion(SuccessFailureNode):
                 name="pix_fmt",
                 type="str",
                 default_value="yuv420p",
-                tooltip="4:4:4 preserves chroma into the swap but High 4:4:4 Predictive chokes some tools — "
-                "try 420 first.",
+                tooltip="4:4:4 preserves chroma into the comp but chokes some tools — try 420 first.",
                 allowed_modes={ParameterMode.PROPERTY},
                 traits={Options(choices=PIX_FMTS)},
-            )
-        )
-        self.add_parameter(
-            Parameter(
-                name="audio_source",
-                type="str",
-                default_value="plate",
-                tooltip="Face-swap tools often require an audio track. plate = copy the plate's audio "
-                "(falls back to a silent track if the plate has none, so audio is always present); "
-                "silent = always add a silent track; none = strip audio.",
-                allowed_modes={ParameterMode.PROPERTY},
-                traits={Options(choices=AUDIO_SOURCES)},
             )
         )
         self.add_parameter(
@@ -147,16 +169,16 @@ class CropToRegion(SuccessFailureNode):
                 input_types=["str"],
                 type="str",
                 default_value="",
-                tooltip="Optional folder to also save the head clip into, e.g. {project_dir}/outputs. "
+                tooltip="Optional folder to also save the repositioned clip into, e.g. {project_dir}/outputs. "
                 "Leave empty to skip saving a file copy.",
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )
         self.add_parameter(
             Parameter(
-                name="head_video",
+                name="repositioned_video",
                 output_type="VideoUrlArtifact",
-                tooltip="The square head clip (audio stripped).",
+                tooltip="Full-frame video with the crop placed at the tracked positions.",
                 allowed_modes={ParameterMode.OUTPUT},
             )
         )
@@ -164,13 +186,13 @@ class CropToRegion(SuccessFailureNode):
             Parameter(
                 name="region_out",
                 output_type="json",
-                tooltip="The region dict, passed through unchanged for Composite Region Back.",
+                tooltip="The region dict, passed through unchanged.",
                 allowed_modes={ParameterMode.OUTPUT},
             )
         )
         self._create_status_parameters(
-            result_details_tooltip="Details about the crop result",
-            result_details_placeholder="Crop details will appear here.",
+            result_details_tooltip="Details about the reposition result",
+            result_details_placeholder="Reposition details will appear here.",
         )
 
     def process(self) -> AsyncResult[None]:
@@ -185,35 +207,39 @@ class CropToRegion(SuccessFailureNode):
             source_path, temp_path = self._artifact_to_local_file(self.parameter_values.get("video"), "video")
             crf = int(self.parameter_values.get("crf") or 12)
             pix_fmt = self.parameter_values.get("pix_fmt") or "yuv420p"
+            background = self.parameter_values.get("background") or "black"
+            output_scale = float(self.parameter_values.get("output_scale") or 1.0)
+            if output_scale <= 0:
+                output_scale = 1.0
 
-            out_path = Path(tempfile.gettempdir()) / f"faceprep_head_{uuid.uuid4().hex}.mp4"
-            if region["mode"] == "static":
-                self._crop_static(source_path, region, out_path, crf, pix_fmt)
-            else:
-                self._crop_tracked(source_path, region, out_path, crf, pix_fmt)
+            out_path = Path(tempfile.gettempdir()) / f"figureprep_repositioned_{uuid.uuid4().hex}.mp4"
+            frames_done, in_dims, scaled, out_dims = self._reposition(
+                source_path, region, out_path, crf, pix_fmt, background, output_scale
+            )
 
-            final_path, audio_note = self._attach_audio(out_path, source_path)
-            data = final_path.read_bytes()
-            if final_path != out_path:
-                final_path.unlink(missing_ok=True)
-            filename = f"faceprep_head_{uuid.uuid4().hex[:8]}.mp4"
-            try:
-                saved_url = GriptapeNodes.StaticFilesManager().save_static_file(data, filename)
-            except Exception:
-                logger.warning("Could not save %s to static files", filename, exc_info=True)
-                raise
+            data = out_path.read_bytes()
+            filename = f"figureprep_repositioned_{uuid.uuid4().hex[:8]}.mp4"
+            saved_url = GriptapeNodes.StaticFilesManager().save_static_file(data, filename)
             self._saved_files: list[str] = []
             self._save_copy_to_output_directory(data, filename)
-            self.parameter_output_values["head_video"] = VideoUrlArtifact(value=saved_url, name=filename)
+            self.parameter_output_values["repositioned_video"] = VideoUrlArtifact(value=saved_url, name=filename)
             self.parameter_output_values["region_out"] = region
 
-            box = region["box"]
-            saved_note = "\nSaved files:\n" + "\n".join(self._saved_files) if self._saved_files else ""
+            source = region["source"]
+            warnings = []
+            if frames_done != source["frame_count"]:
+                warnings.append(
+                    f"Input has {frames_done} frame(s) but the track covers {source['frame_count']} — "
+                    "check that the generator preserved the clip length."
+                )
+            scale_note = f" (input {in_dims[0]}x{in_dims[1]}, resampled)" if scaled else " (input placed 1:1)"
+            warning_text = ("\nWARNING: " + "\nWARNING: ".join(warnings)) if warnings else ""
             self._set_status_results(
                 was_successful=True,
                 result_details=(
-                    f"Cropped {box['width']}x{box['height']} ({region['mode']}) head clip, "
-                    f"{len(data) / (1024 * 1024):.1f} MB at CRF {crf} {pix_fmt}, audio: {audio_note}.{saved_note}"
+                    f"Placed {frames_done} frames{scale_note} onto a {out_dims[0]}x{out_dims[1]} "
+                    f"{background} canvas at output_scale {output_scale:g}, "
+                    f"{len(data) / (1024 * 1024):.1f} MB at CRF {crf} {pix_fmt}.{warning_text}"
                 ),
             )
         except Exception as e:
@@ -225,43 +251,51 @@ class CropToRegion(SuccessFailureNode):
             if out_path is not None:
                 out_path.unlink(missing_ok=True)
 
-    # -- Crop paths ---------------------------------------------------------
+    # -- Reposition ----------------------------------------------------------
 
-    def _crop_static(self, source_path: Path, region: dict, out_path: Path, crf: int, pix_fmt: str) -> None:
-        ffmpeg, _ = _ffmpeg_paths()
-        box = region["box"]
-        result = subprocess.run(
-            [
-                ffmpeg, "-y", "-i", str(source_path),
-                "-vf", f"crop={box['width']}:{box['height']}:{box['x']}:{box['y']}",
-                "-c:v", "libx264", "-preset", "slow", "-crf", str(crf), "-pix_fmt", pix_fmt,
-                "-an", str(out_path),
-            ],
-            capture_output=True,
-            text=True,
-            check=False,
-        )
-        if result.returncode != 0 or not out_path.is_file():
-            raise RuntimeError(f"ffmpeg static crop failed: {(result.stderr or '')[-400:]}")
+    def _reposition(
+        self,
+        source_path: Path,
+        region: dict,
+        out_path: Path,
+        crf: int,
+        pix_fmt: str,
+        background: str,
+        output_scale: float,
+    ) -> tuple[int, tuple[int, int], bool, tuple[int, int]]:
+        """Returns (frames_done, input_dims, was_resampled, output_dims).
 
-    def _crop_tracked(self, source_path: Path, region: dict, out_path: Path, crf: int, pix_fmt: str) -> None:
-        """Decode -> numpy slice per frame at that frame's offset -> encode. Streamed, never in memory."""
+        With output_scale matching the generator's upsample of the crop (e.g. 2.0 for
+        a 640x1080 crop generated at 1280x2160), the input lands on the canvas 1:1 —
+        no resampling, every generated pixel kept.
+        """
         ffmpeg, _ = _ffmpeg_paths()
         source = region["source"]
-        box_w, box_h = region["box"]["width"], region["box"]["height"]
         offsets = region["offsets"]
-        src_w, src_h = source["width"], source["height"]
-        frame_bytes = src_w * src_h * 3
 
-        decoder = subprocess.Popen(
-            [ffmpeg, "-v", "error", "-i", str(source_path), "-f", "rawvideo", "-pix_fmt", "bgr24", "-"],
-            stdout=subprocess.PIPE,
-            stderr=subprocess.DEVNULL,
-        )
+        def _even(value: float) -> int:
+            return max(2, int(round(value / 2.0)) * 2)
+
+        out_w, out_h = _even(source["width"] * output_scale), _even(source["height"] * output_scale)
+        place_w = min(out_w, _even(region["box"]["width"] * output_scale))
+        place_h = min(out_h, _even(region["box"]["height"] * output_scale))
+
+        cap = cv2.VideoCapture(str(source_path))
+        if not cap.isOpened():
+            raise RuntimeError(f"Could not open video {source_path.name} with OpenCV.")
+        in_w = int(cap.get(cv2.CAP_PROP_FRAME_WIDTH))
+        in_h = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
+        needs_scale = (in_w, in_h) != (place_w, place_h)
+        # AREA for shrinking, LANCZOS4 for enlarging — standard quality picks.
+        interpolation = cv2.INTER_AREA if (in_w * in_h) > (place_w * place_h) else cv2.INTER_LANCZOS4
+
+        base_canvas = np.empty((out_h, out_w, 3), dtype=np.uint8)
+        base_canvas[:] = BACKGROUND_BGR.get(background, (0, 0, 0))
+
         encoder = subprocess.Popen(
             [
                 ffmpeg, "-y", "-f", "rawvideo", "-pix_fmt", "bgr24",
-                "-s", f"{box_w}x{box_h}", "-r", f"{source['frame_rate']:.6f}",
+                "-s", f"{out_w}x{out_h}", "-r", f"{source['frame_rate']:.6f}",
                 "-i", "-", "-an", "-c:v", "libx264", "-preset", "slow",
                 "-crf", str(crf), "-pix_fmt", pix_fmt, *_encoder_color_args(source_path), str(out_path),
             ],
@@ -272,68 +306,27 @@ class CropToRegion(SuccessFailureNode):
         frames_done = 0
         try:
             while True:
-                chunk = decoder.stdout.read(frame_bytes)
-                if len(chunk) < frame_bytes:
+                ok, frame = cap.read()
+                if not ok:
                     break
-                frame = np.frombuffer(chunk, dtype=np.uint8).reshape(src_h, src_w, 3)
+                if needs_scale:
+                    frame = cv2.resize(frame, (place_w, place_h), interpolation=interpolation)
                 x, y = offsets[min(frames_done, len(offsets) - 1)]
-                encoder.stdin.write(frame[y : y + box_h, x : x + box_w].tobytes())
+                x = min(int(round(x * output_scale)), out_w - place_w)
+                y = min(int(round(y * output_scale)), out_h - place_h)
+                canvas = base_canvas.copy()
+                canvas[y : y + place_h, x : x + place_w] = frame
+                encoder.stdin.write(canvas.tobytes())
                 frames_done += 1
         finally:
-            decoder.stdout.close()
-            decoder.wait()
+            cap.release()
             encoder.stdin.close()
             encoder.wait()
         if encoder.returncode != 0 or not out_path.is_file():
-            raise RuntimeError("ffmpeg failed while encoding the tracked crop.")
-        if frames_done != source["frame_count"]:
-            logger.warning(
-                "Tracked crop decoded %d frames but region.source.frame_count is %d",
-                frames_done,
-                source["frame_count"],
-            )
-
-    # -- Audio ---------------------------------------------------------------
-
-    def _has_audio(self, path: Path) -> bool:
-        _, ffprobe = _ffmpeg_paths()
-        probe = subprocess.run(
-            [ffprobe, "-v", "error", "-select_streams", "a:0", "-show_entries", "stream=codec_type",
-             "-of", "csv=p=0", str(path)],
-            capture_output=True,
-            text=True,
-            timeout=120,
-            check=False,
-        )
-        return "audio" in (probe.stdout or "")
-
-    def _attach_audio(self, video_path: Path, plate_path: Path) -> tuple[Path, str]:
-        """Mux plate or silent audio onto the video-only crop; returns (path, note for result_details)."""
-        mode = self.parameter_values.get("audio_source") or "plate"
-        if mode == "none":
-            return video_path, "none"
-        use_plate = mode == "plate" and self._has_audio(plate_path)
-        note = "copied from plate" if use_plate else ("silent track (plate has no audio)" if mode == "plate" else "silent track")
-
-        ffmpeg, _ = _ffmpeg_paths()
-        muxed = Path(tempfile.gettempdir()) / f"faceprep_head_audio_{uuid.uuid4().hex}.mp4"
-        if use_plate:
-            cmd = [
-                ffmpeg, "-y", "-i", str(video_path), "-i", str(plate_path),
-                "-map", "0:v:0", "-map", "1:a:0", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k",
-                "-shortest", str(muxed),
-            ]
-        else:
-            cmd = [
-                ffmpeg, "-y", "-i", str(video_path),
-                "-f", "lavfi", "-i", "anullsrc=channel_layout=stereo:sample_rate=48000",
-                "-map", "0:v:0", "-map", "1:a", "-c:v", "copy", "-c:a", "aac", "-b:a", "128k",
-                "-shortest", str(muxed),
-            ]
-        result = subprocess.run(cmd, capture_output=True, text=True, check=False)
-        if result.returncode != 0 or not muxed.is_file():
-            raise RuntimeError(f"ffmpeg audio mux failed: {(result.stderr or '')[-400:]}")
-        return muxed, note
+            raise RuntimeError("ffmpeg failed while encoding the repositioned video.")
+        if frames_done == 0:
+            raise RuntimeError("Input video decoded zero frames.")
+        return frames_done, (in_w, in_h), needs_scale, (out_w, out_h)
 
     # -- Output directory + media input handling (copied from
     # hyperreal/heygen/avatar_video.py; node files are self-contained) ------
@@ -355,7 +348,7 @@ class CropToRegion(SuccessFailureNode):
             target.write_bytes(data)
             self._saved_files.append(str(target))
         except Exception as e:
-            logger.warning("Could not save head clip to %r", directory, exc_info=True)
+            logger.warning("Could not save repositioned clip to %r", directory, exc_info=True)
             self._saved_files.append(f"FAILED to save into {directory}: {e}")
 
     def _resolve_directory(self, value: str) -> Path:
@@ -386,7 +379,7 @@ class CropToRegion(SuccessFailureNode):
             if path is not None:
                 return path, None
         data = self._artifact_to_bytes(artifact, label)
-        handle = Path(tempfile.gettempdir()) / f"faceprep_{label}_{uuid.uuid4().hex}.mp4"
+        handle = Path(tempfile.gettempdir()) / f"figureprep_{label}_{uuid.uuid4().hex}.mp4"
         handle.write_bytes(data)
         return handle, handle
 
