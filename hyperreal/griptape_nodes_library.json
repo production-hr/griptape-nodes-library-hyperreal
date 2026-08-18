@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.14.0",
+        "library_version": "0.15.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -155,6 +155,14 @@
                 "title": "Matte",
                 "description": "Video matte refinement — hard segmentation masks to soft edge-accurate alpha",
                 "icon": "Video"
+            }
+        },
+        {
+            "video/chunk": {
+                "color": "border-amber-500",
+                "title": "Chunk",
+                "description": "Frame-exact splitting for clips too long to process in one pass",
+                "icon": "Scissors"
             }
         },
         {
@@ -327,6 +335,15 @@
                 "category": "image/matte",
                 "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
                 "display_name": "Extract Image Matte"
+            }
+        },
+        {
+            "class_name": "SplitVideoFrameAccurate",
+            "file_path": "chunk/split_video_frame_accurate.py",
+            "metadata": {
+                "category": "video/chunk",
+                "description": "Split a video into frame-exact chunks and verify each by decoding it back — for clips too long for SAM3 to hold in VRAM. Unlike time-based splitting, chunks cannot silently overlap or drop frames.",
+                "display_name": "Split Video (Frame Accurate)"
             }
         },
         {
