@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.15.0",
+        "library_version": "0.16.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -335,6 +335,15 @@
                 "category": "image/matte",
                 "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
                 "display_name": "Extract Image Matte"
+            }
+        },
+        {
+            "class_name": "JoinVideoChunks",
+            "file_path": "chunk/join_video_chunks.py",
+            "metadata": {
+                "category": "video/chunk",
+                "description": "Join video chunks back into one clip and verify the joined frame count against the sum of its parts. Accepts the untyped list a ForEach End produces, which the stock Concatenate Videos node rejects.",
+                "display_name": "Join Video Chunks"
             }
         },
         {
