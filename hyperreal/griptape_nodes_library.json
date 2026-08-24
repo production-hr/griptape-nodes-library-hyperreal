@@ -1,4 +1,4 @@
-{
+﻿{
     "name": "HyperReal Nodes",
     "library_schema_version": "0.5.0",
     "settings": [
@@ -22,7 +22,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.16.0",
+        "library_version": "0.16.1",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -153,7 +153,7 @@
             "video/matte": {
                 "color": "border-teal-500",
                 "title": "Matte",
-                "description": "Video matte refinement — hard segmentation masks to soft edge-accurate alpha",
+                "description": "Video matte refinement â€” hard segmentation masks to soft edge-accurate alpha",
                 "icon": "Video"
             }
         },
@@ -333,7 +333,7 @@
             "file_path": "matte/extract_image_matte.py",
             "metadata": {
                 "category": "image/matte",
-                "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally — white = subject, ready for Resolve/Nuke or the Composite nodes.",
+                "description": "Extract a soft-alpha matte and RGBA cutout from a still image using rembg/BiRefNet, locally â€” white = subject, ready for Resolve/Nuke or the Composite nodes.",
                 "display_name": "Extract Image Matte"
             }
         },
@@ -351,7 +351,7 @@
             "file_path": "chunk/split_video_frame_accurate.py",
             "metadata": {
                 "category": "video/chunk",
-                "description": "Split a video into frame-exact chunks and verify each by decoding it back — for clips too long for SAM3 to hold in VRAM. Unlike time-based splitting, chunks cannot silently overlap or drop frames.",
+                "description": "Split a video into frame-exact chunks and verify each by decoding it back â€” for clips too long for SAM3 to hold in VRAM. Unlike time-based splitting, chunks cannot silently overlap or drop frames.",
                 "display_name": "Split Video (Frame Accurate)"
             }
         },
@@ -360,7 +360,7 @@
             "file_path": "matte/refine_video_matte.py",
             "metadata": {
                 "category": "video/matte",
-                "description": "Refine a hard matte video (SAM3, keyer, Magic Mask export) into a soft edge-accurate alpha using the RGB clip as guide — guided-filter edge refinement, no extra dependencies.",
+                "description": "Refine a hard matte video (SAM3, keyer, Magic Mask export) into a soft edge-accurate alpha using the RGB clip as guide â€” guided-filter edge refinement, no extra dependencies.",
                 "display_name": "Refine Video Matte"
             }
         },

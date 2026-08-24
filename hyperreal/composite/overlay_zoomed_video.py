@@ -265,6 +265,19 @@ class OverlayZoomedVideo(SuccessFailureNode):
         )
         self.add_parameter(
             Parameter(
+                name="frame_tolerance",
+                input_types=["int"],
+                type="int",
+                default_value=2,
+                tooltip="Allowed frame-count difference between base and overlay. Generators round a partial "
+                "final frame differently run to run (1804 vs 1805 from the same audio is normal); within "
+                "tolerance the longer clip's tail is passed through unblended. Larger mismatches still fail "
+                "because they would drift the lipsync.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+            )
+        )
+        self.add_parameter(
+            Parameter(
                 name="crf",
                 input_types=["int"],
                 type="int",
@@ -362,7 +375,8 @@ class OverlayZoomedVideo(SuccessFailureNode):
                     f"top-left ({placement['x']}, {placement['y']}), "
                     f"blend {placement['blend_width']}x{placement['blend_height']} "
                     f"({self.parameter_values.get('edge_shape')}, feather "
-                    f"{self.parameter_values.get('feather_px')}px).{notes}\n"
+                    f"{self.parameter_values.get('feather_px')}px).{notes}"
+                    f"{getattr(self, '_frame_mismatch_note', '')}\n"
                     f"Check 'alignment_preview' before committing to a long render; nudge with "
                     f"scale_adjust / offset_x / offset_y.{saved_note}"
                 ),
@@ -380,12 +394,20 @@ class OverlayZoomedVideo(SuccessFailureNode):
         self, base_path: Path, over_path: Path, base: dict[str, Any], over: dict[str, Any]
     ) -> None:
         self._check_pillarbox(over_path, over, base)
-        if base["frame_count"] != over["frame_count"]:
+        tolerance = max(0, int(self.parameter_values.get("frame_tolerance") or 0))
+        mismatch = abs(base["frame_count"] - over["frame_count"])
+        if mismatch > tolerance:
             raise ValueError(
                 f"base_video has {base['frame_count']} frames but overlay_video has {over['frame_count']} — "
-                "they must be the same length (generate both from the same audio). A mismatch would drift "
-                "the lipsync out of step partway through."
+                f"a difference of {mismatch}, above frame_tolerance ({tolerance}). Both must come from the "
+                "same audio; a real mismatch would drift the lipsync out of step partway through. "
+                "(A 1-2 frame difference is normal generator rounding — raise frame_tolerance if so.)"
             )
+        self._frame_mismatch_note = (
+            f"\nNote: base and overlay differ by {mismatch} frame(s) (within frame_tolerance {tolerance}); "
+            "the longer clip's final frame(s) pass through unblended."
+            if mismatch else ""
+        )
         if abs(base["frame_rate"] - over["frame_rate"]) > 0.01:
             raise ValueError(
                 f"base_video is {base['frame_rate']:.3f} fps but overlay_video is {over['frame_rate']:.3f} fps — "
