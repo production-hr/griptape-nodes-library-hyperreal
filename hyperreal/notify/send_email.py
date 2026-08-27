@@ -127,7 +127,8 @@ class SendEmail(SuccessFailureNode):
             host = str(secrets.get_secret(SECRET_HOST)).strip()
             port = int(str(secrets.get_secret(SECRET_PORT)).strip() or 587)
             user = str(secrets.get_secret(SECRET_USER)).strip()
-            password = str(secrets.get_secret(SECRET_PASSWORD))
+            # Google shows app passwords as "abcd efgh ijkl mnop"; the spaces are display-only.
+            password = "".join(str(secrets.get_secret(SECRET_PASSWORD)).split())
 
             recipients = [a.strip() for a in str(self.parameter_values.get("to") or "").split(",") if a.strip()]
             if not recipients:
@@ -162,8 +163,11 @@ class SendEmail(SuccessFailureNode):
         except smtplib.SMTPAuthenticationError as e:
             self.parameter_output_values["sent"] = False
             msg = (
-                f"SMTP login rejected for {SECRET_USER} ({e.smtp_code}). For Google Workspace use a 16-character "
-                "APP PASSWORD (2-Step Verification must be on), not the account password."
+                f"SMTP login rejected ({e.smtp_code}) for SMTP_USER='{user}' on {host}:{port}; password length "
+                f"{len(password)} (16 = app password, spaces removed). Server said: "
+                f"{e.smtp_error.decode(errors='replace') if isinstance(e.smtp_error, bytes) else e.smtp_error}. "
+                "For Google Workspace: SMTP_USER must be the full address that OWNS the app password, 2-Step "
+                "Verification must be on, and the engine must be RESTARTED after changing any secret."
             )
             self._set_status_results(was_successful=False, result_details=msg)
             self._handle_failure_exception(RuntimeError(msg))
