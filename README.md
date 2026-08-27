@@ -363,6 +363,28 @@ Dark clothing sits close to green in UV space, so past ~0.12 the key eats the su
 
 For the source footage itself: fill the frame with green, keep the field flat (no floor line, gradient, or vignette), nothing green on the subject, highest resolution available, and `expressiveness: "low"` on the HeyGen leg — camera drift on a locked-off plate reads as a cutout faster than any keying artefact.
 
+### Tavus replica training (`TavusTrainReplica`, `TavusReplicaStatus`)
+
+Replaces the n8n "Replica Training Manager": train a Tavus conversational replica from inside Griptape.
+Tavus fetches the training video from a **public URL**, so the workflow is:
+
+```
+Load Video → Upload to Spaces (public=true) → Tavus Train Replica → (later) Tavus Replica Status
+```
+
+- **Tavus Train Replica** — `POST /v2/replicas` with `train_video_url`, optional `replica_name`,
+  `consent_video_url` (separate consent clip; omit when the consent statement is inside the training
+  video), `model_name` (default `phoenix-3`), `callback_url`, and `properties.gaze_correction` /
+  `properties.background_green_screen`. Refuses local/localhost URLs up front. Outputs `replica_id`
+  (keep it — it *is* the replica), initial `status`, raw `response`.
+- **Tavus Replica Status** — `GET /v2/replicas/{id}?verbose=true`. One check by default; set
+  `wait_until_complete` to poll (`poll_interval_seconds`, `max_wait_minutes` — training takes hours).
+  Outputs `status`, `training_progress`, `replica_name`, `thumbnail_video_url`, `error_message`, full
+  `replica` record. Fails readably with Tavus's `error_message` on a failed training.
+
+Secret: `TAVUS_API_KEY` (Settings → API Keys & Secrets; **engine restart** after adding, as with any
+new secret). Header is `x-api-key`. 429s honor `Retry-After`.
+
 ### Upload to Spaces (`UploadToSpaces`)
 
 Media artifact → object in a DigitalOcean Spaces bucket, returning its public URL. Spaces is S3-compatible, so the node uses `boto3` with a custom `endpoint_url` — no DO-specific SDK.
@@ -520,6 +542,16 @@ Both nodes ran in production through the sandbox before graduation:
 - [ ] Coverage warning fires on a wrong-model run (nearly-empty or nearly-full matte)
 - [ ] First-run model download completes and is reported readably; second run is fast (session cache)
 - [ ] `output_directory` copies both files with collision suffixes
+
+## Verification — Tavus replica training (pending live run)
+
+- [ ] Add `TAVUS_API_KEY` in Settings, restart the engine; both nodes appear under **Video → Tavus**
+- [ ] Load Video → Upload to Spaces (public) → Tavus Train Replica submits and returns a `replica_id`; the replica appears in the Tavus dashboard with the given name
+- [ ] Wrong/absent key produces the readable "rejected the API key" error, not a stack trace
+- [ ] A localhost / non-URL `train_video_url` is refused before any API call
+- [ ] Tavus Replica Status (single check) reports `status` + `training_progress` for the new replica; `wait_until_complete` polls at the set interval and returns on completion
+- [ ] A deliberately bad `replica_id` yields the readable 404 message
+- [ ] Field names in `POST /v2/replicas` confirmed against the live API (`train_video_url`, `consent_video_url`, `properties.gaze_correction`, `properties.background_green_screen`, `model_name`)
 
 ## Verification — Figure Prep nodes (pending live run)
 

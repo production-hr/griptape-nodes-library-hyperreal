@@ -14,7 +14,8 @@
                     "DO_SPACES_SECRET",
                     "DO_SPACES_REGION",
                     "DO_SPACES_ENDPOINT",
-                    "RUNCOMFY_TOKEN"
+                    "RUNCOMFY_TOKEN",
+                    "TAVUS_API_KEY"
                 ]
             }
         }
@@ -22,7 +23,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.16.1",
+        "library_version": "0.17.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -170,6 +171,14 @@
                 "color": "border-orange-500",
                 "title": "ComfyUI",
                 "description": "Serverless ComfyUI workflows run via the RunComfy API",
+                "icon": "Video"
+            }
+        },
+        {
+            "video/tavus": {
+                "color": "border-pink-500",
+                "title": "Tavus",
+                "description": "Conversational replica training and status via the Tavus API",
                 "icon": "Video"
             }
         }
@@ -389,6 +398,24 @@
                 "category": "video/comfyui",
                 "description": "Run the SCAIL Infinite ComfyUI workflow on RunComfy: image + prompts + motion video, optional LoRA and size, cancellable polling, returns the output video URL.",
                 "display_name": "RunComfy SCAIL Infinite"
+            }
+        },
+        {
+            "class_name": "TavusTrainReplica",
+            "file_path": "tavus/train_replica.py",
+            "metadata": {
+                "category": "video/tavus",
+                "description": "Start training a Tavus conversational replica from a public training-video URL (Upload to Spaces first).",
+                "display_name": "Tavus Train Replica"
+            }
+        },
+        {
+            "class_name": "TavusReplicaStatus",
+            "file_path": "tavus/replica_status.py",
+            "metadata": {
+                "category": "video/tavus",
+                "description": "Fetch a Tavus replica's training status and progress, optionally waiting until it completes.",
+                "display_name": "Tavus Replica Status"
             }
         }
     ]
