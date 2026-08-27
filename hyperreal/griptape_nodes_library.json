@@ -15,7 +15,11 @@
                     "DO_SPACES_REGION",
                     "DO_SPACES_ENDPOINT",
                     "RUNCOMFY_TOKEN",
-                    "TAVUS_API_KEY"
+                    "TAVUS_API_KEY",
+                    "SMTP_HOST",
+                    "SMTP_PORT",
+                    "SMTP_USER",
+                    "SMTP_PASSWORD"
                 ]
             }
         }
@@ -23,7 +27,7 @@
     "metadata": {
         "author": "HyperReal",
         "description": "HyperReal's custom Griptape Nodes: HeyGen avatar lipsync video generation and video translation, Topaz video and still-image upscaling, WaveSpeed image editing and InfiniteTalk video, face-swap prep (detect/crop/composite), chroma-key compositing, DigitalOcean Spaces uploads, with ViewComfy nodes to follow.",
-        "library_version": "0.17.0",
+        "library_version": "0.18.0",
         "engine_version": "0.86.0",
         "tags": [
             "HyperReal",
@@ -180,6 +184,14 @@
                 "title": "Tavus",
                 "description": "Conversational replica training and status via the Tavus API",
                 "icon": "Video"
+            }
+        },
+        {
+            "notify/email": {
+                "color": "border-yellow-500",
+                "title": "Notify",
+                "description": "Pipeline notifications — email over SMTP",
+                "icon": "Mail"
             }
         }
     ],
@@ -416,6 +428,24 @@
                 "category": "video/tavus",
                 "description": "Fetch a Tavus replica's training status and progress, optionally waiting until it completes.",
                 "display_name": "Tavus Replica Status"
+            }
+        },
+        {
+            "class_name": "TavusTrainingSettings",
+            "file_path": "tavus/training_settings.py",
+            "metadata": {
+                "category": "video/tavus",
+                "description": "One-stop settings for a Tavus replica training run (name, type, model, flags, Spaces target, notification addresses), wired to every node that needs them.",
+                "display_name": "Tavus Training Settings"
+            }
+        },
+        {
+            "class_name": "SendEmail",
+            "file_path": "notify/send_email.py",
+            "metadata": {
+                "category": "notify/email",
+                "description": "Send a plain-text notification email over SMTP (Google Workspace app password or any SMTP host).",
+                "display_name": "Send Email"
             }
         }
     ]

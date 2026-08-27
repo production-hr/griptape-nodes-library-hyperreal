@@ -140,6 +140,16 @@ class UploadToSpaces(SuccessFailureNode):
                 allowed_modes={ParameterMode.OUTPUT},
             )
         )
+        self.add_parameter(
+            Parameter(
+                name="allow_empty",
+                type="bool",
+                default_value=False,
+                tooltip="If no artifact is connected/loaded, succeed with an empty url instead of failing. "
+                "For optional inputs (e.g. a consent video only needed for Human replicas).",
+                allowed_modes={ParameterMode.PROPERTY},
+            )
+        )
         self._create_status_parameters(
             result_details_tooltip="Details about the Spaces upload result",
             result_details_placeholder="Upload details will appear here.",
@@ -174,7 +184,19 @@ class UploadToSpaces(SuccessFailureNode):
             if not bucket:
                 raise ValueError("No bucket name set.")
 
-            data = self._artifact_to_bytes(self.parameter_values.get("artifact"), "artifact")
+            artifact = self.parameter_values.get("artifact")
+            raw_value = getattr(artifact, "value", artifact)
+            is_empty = raw_value is None or (isinstance(raw_value, str) and not raw_value.strip())
+            if is_empty and bool(self.parameter_values.get("allow_empty")):
+                self.parameter_output_values["url"] = ""
+                self.parameter_output_values["key"] = ""
+                self._set_status_results(
+                    was_successful=True,
+                    result_details="No artifact connected and allow_empty is on — upload skipped, url is empty.",
+                )
+                return
+
+            data = self._artifact_to_bytes(artifact, "artifact")
             mime = _sniff_mime(data, "application/octet-stream")
             filename = self._derive_filename(mime)
 

@@ -92,6 +92,14 @@ class TavusReplicaStatus(SuccessFailureNode):
                 allowed_modes={ParameterMode.OUTPUT},
             )
         )
+        self.add_parameter(
+            Parameter(
+                name="status_summary",
+                output_type="str",
+                tooltip="Ready-to-send plain-text summary of the status — wire into Send Email 'body'.",
+                allowed_modes={ParameterMode.OUTPUT},
+            )
+        )
         self._create_status_parameters(
             result_details_tooltip="Details about the Tavus replica status check",
             result_details_placeholder="Status details will appear here.",
@@ -163,12 +171,32 @@ class TavusReplicaStatus(SuccessFailureNode):
             self._handle_failure_exception(e)
 
     def _publish(self, record: dict) -> None:
-        self.parameter_output_values["status"] = str(record.get("status") or "")
-        self.parameter_output_values["training_progress"] = str(record.get("training_progress") or "")
+        status = str(record.get("status") or "")
+        progress = str(record.get("training_progress") or "")
+        error = str(record.get("error_message") or "")
+        self.parameter_output_values["status"] = status
+        self.parameter_output_values["training_progress"] = progress
         self.parameter_output_values["replica_name"] = str(record.get("replica_name") or "")
         self.parameter_output_values["thumbnail_video_url"] = str(record.get("thumbnail_video_url") or "")
-        self.parameter_output_values["error_message"] = str(record.get("error_message") or "")
+        self.parameter_output_values["error_message"] = error
         self.parameter_output_values["replica"] = record
+        headline = {
+            "completed": "Tavus replica training COMPLETED",
+            "ready": "Tavus replica training COMPLETED",
+            "error": "Tavus replica training FAILED",
+            "failed": "Tavus replica training FAILED",
+        }.get(status.lower(), f"Tavus replica training status: {status or 'unknown'}")
+        self.parameter_output_values["status_summary"] = (
+            f"{headline}\n"
+            f"\n"
+            f"Replica name: {record.get('replica_name') or '(unnamed)'}\n"
+            f"Replica ID: {record.get('replica_id') or ''}\n"
+            f"Status: {status}\n"
+            f"Progress: {progress or 'n/a'}\n"
+            f"Preview: {record.get('thumbnail_video_url') or '(not yet available)'}\n"
+            f"Error: {error or 'none'}\n"
+            f"Checked: {time.strftime('%Y-%m-%d %H:%M:%S')}"
+        )
 
     def _fetch(self, api_key: str, replica_id: str) -> dict:
         response = self._request("GET", f"/v2/replicas/{replica_id}?verbose=true", api_key)

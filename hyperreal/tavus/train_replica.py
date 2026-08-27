@@ -8,6 +8,7 @@ import requests
 from griptape_nodes.exe_types.core_types import Parameter, ParameterMode
 from griptape_nodes.exe_types.node_types import AsyncResult, SuccessFailureNode
 from griptape_nodes.retained_mode.griptape_nodes import GriptapeNodes
+from griptape_nodes.traits.options import Options
 
 logger = logging.getLogger("griptape_nodes")
 
@@ -15,6 +16,7 @@ API_BASE = "https://tavusapi.com"
 API_KEY_NAME = "TAVUS_API_KEY"
 REQUEST_TIMEOUT_SECONDS = 60
 DEFAULT_MODEL = "phoenix-3"
+REPLICA_TYPES = ["AI", "Human"]
 
 
 def _as_url(value: Any, label: str) -> str:
@@ -99,20 +101,33 @@ class TavusTrainReplica(SuccessFailureNode):
         )
         self.add_parameter(
             Parameter(
+                name="replica_type",
+                input_types=["str"],
+                type="str",
+                default_value="AI",
+                tooltip="AI = synthetic subject, consent video ignored. Human = real person, consent video REQUIRED.",
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
+                traits={Options(choices=REPLICA_TYPES)},
+            )
+        )
+        self.add_parameter(
+            Parameter(
                 name="gaze_correction",
+                input_types=["bool"],
                 type="bool",
-                default_value=True,
+                default_value=False,
                 tooltip="Ask Tavus to correct the subject's gaze toward camera.",
-                allowed_modes={ParameterMode.PROPERTY},
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )
         self.add_parameter(
             Parameter(
                 name="background_green_screen",
+                input_types=["bool"],
                 type="bool",
                 default_value=False,
                 tooltip="Tell Tavus the training video was shot on green screen so it can key it.",
-                allowed_modes={ParameterMode.PROPERTY},
+                allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )
         self.add_parameter(
@@ -147,6 +162,14 @@ class TavusTrainReplica(SuccessFailureNode):
                 name="response",
                 output_type="json",
                 tooltip="Raw Tavus response for the submission.",
+                allowed_modes={ParameterMode.OUTPUT},
+            )
+        )
+        self.add_parameter(
+            Parameter(
+                name="launch_summary",
+                output_type="str",
+                tooltip="Ready-to-send plain-text summary of the submission — wire into Send Email 'body'.",
                 allowed_modes={ParameterMode.OUTPUT},
             )
         )
@@ -192,8 +215,18 @@ class TavusTrainReplica(SuccessFailureNode):
             model = (self.parameter_values.get("model_name") or "").strip()
             if model:
                 body["model_name"] = model
-            if _optional_url(self.parameter_values.get("consent_video_url")):
+            replica_type = str(self.parameter_values.get("replica_type") or "AI").strip()
+            consent_present = _optional_url(self.parameter_values.get("consent_video_url")) is not None
+            consent_note = ""
+            if replica_type.lower() == "human":
+                if not consent_present:
+                    raise ValueError(
+                        "replica_type is Human but no consent video URL is present. Load the consent video in the "
+                        "Consent Video node (Tavus requires a consent statement for real people), or set type to AI."
+                    )
                 body["consent_video_url"] = _as_url(self.parameter_values.get("consent_video_url"), "consent_video_url")
+            elif consent_present:
+                consent_note = " A consent video was loaded but replica_type is AI, so it was not sent."
             callback = (self.parameter_values.get("callback_url") or "").strip()
             if callback:
                 body["callback_url"] = callback
@@ -206,15 +239,32 @@ class TavusTrainReplica(SuccessFailureNode):
                 raise RuntimeError(f"Tavus accepted the request but returned no replica_id: {response.text[:300]}")
             status = data.get("status") or "started"
 
+            summary = (
+                f"Tavus replica training LAUNCHED\n"
+                f"\n"
+                f"Replica name: {name or '(unnamed)'}\n"
+                f"Type: {replica_type}\n"
+                f"Model: {model or DEFAULT_MODEL}\n"
+                f"Replica ID: {replica_id}\n"
+                f"Initial status: {status}\n"
+                f"Gaze correction: {body['properties']['gaze_correction']}\n"
+                f"Green screen: {body['properties']['background_green_screen']}\n"
+                f"Training video: {body['train_video_url']}\n"
+                f"Consent video: {body.get('consent_video_url', '(none)')}\n"
+                f"Submitted: {time.strftime('%Y-%m-%d %H:%M:%S')}\n"
+                f"\n"
+                f"Training usually takes 2-3 hours. Run the tavus_check workflow with this Replica ID to get the result."
+            )
             self.parameter_output_values["replica_id"] = replica_id
             self.parameter_output_values["status"] = status
             self.parameter_output_values["response"] = data
+            self.parameter_output_values["launch_summary"] = summary
             self._set_status_results(
                 was_successful=True,
                 result_details=(
-                    f"Training submitted: replica_id {replica_id} (status '{status}', model "
-                    f"{model or DEFAULT_MODEL}{', name ' + name if name else ''}). Training takes hours on "
-                    "Tavus's side — check progress with Tavus Replica Status. Keep the replica_id; it is the replica."
+                    f"Training submitted: replica_id {replica_id} (status '{status}', type {replica_type}, model "
+                    f"{model or DEFAULT_MODEL}{', name ' + name if name else ''}).{consent_note} Training takes hours "
+                    "on Tavus's side — check progress with Tavus Replica Status. Keep the replica_id; it is the replica."
                 ),
             )
         except Exception as e:

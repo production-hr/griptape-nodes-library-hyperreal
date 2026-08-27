@@ -385,6 +385,27 @@ Load Video → Upload to Spaces (public=true) → Tavus Train Replica → (later
 Secret: `TAVUS_API_KEY` (Settings → API Keys & Secrets; **engine restart** after adding, as with any
 new secret). Header is `x-api-key`. 429s honor `Retry-After`.
 
+- **Tavus Training Settings** — the one-stop config node (same idiom as Shot Settings): replica name,
+  **type AI / Human**, model, gaze/green-screen flags, Spaces bucket + prefix, notification to/from,
+  optional email note — all published as outputs and wired to the upload, train, status and email nodes.
+  Derives `<replica_name>_training.mp4` / `_consent.mp4` object names for a tidy bucket.
+- **Type rule enforced by Train Replica**: `replica_type` Human → a consent video URL is required (readable
+  error if missing); AI → the consent input is ignored even if something is loaded. The consent Load Video
+  stays on the canvas; leave it empty for AI runs — Upload to Spaces has `allow_empty` for exactly that.
+- `launch_summary` / `status_summary` outputs are ready-made email bodies.
+
+### Send Email (`SendEmail`)
+
+Plain-text notifications over SMTP — standard library, no dependencies. Secrets `SMTP_HOST`, `SMTP_PORT`
+(587 = STARTTLS, 465 = SSL), `SMTP_USER`, `SMTP_PASSWORD`; for Google Workspace: `smtp.gmail.com`, `587`,
+the sending address, and a 16-character **app password** (2-Step Verification required). `to` is
+comma-separated; `from_address` defaults to `SMTP_USER`; `enabled=false` makes dry runs silent. Auth
+failures explain the app-password requirement instead of dumping an SMTP trace.
+
+Reference workflows (hr-griptape-workflows): `tavus_launch` (settings + Load Video(s) → Upload to Spaces →
+Train → "launched" email) and `tavus_check` (replica_id → Status → "completed / failed" email) — Tavus
+training runs 2-3 hours, so launch and check are separate runs.
+
 ### Upload to Spaces (`UploadToSpaces`)
 
 Media artifact → object in a DigitalOcean Spaces bucket, returning its public URL. Spaces is S3-compatible, so the node uses `boto3` with a custom `endpoint_url` — no DO-specific SDK.
