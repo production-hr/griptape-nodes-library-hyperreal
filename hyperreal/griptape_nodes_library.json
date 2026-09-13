@@ -179,6 +179,14 @@
             }
         },
         {
+            "video/dlss5": {
+                "color": "border-green-500",
+                "title": "DLSS 5",
+                "description": "NVIDIA DLSS 5 neural rendering for video, run through a local ComfyUI",
+                "icon": "Sparkles"
+            }
+        },
+        {
             "video/tavus": {
                 "color": "border-pink-500",
                 "title": "Tavus",
@@ -446,6 +454,15 @@
                 "category": "notify/email",
                 "description": "Send a plain-text notification email over SMTP (Google Workspace app password or any SMTP host).",
                 "display_name": "Send Email"
+            }
+        },
+        {
+            "class_name": "Dlss5EnhanceVideo",
+            "file_path": "dlss5/enhance_video.py",
+            "metadata": {
+                "category": "video/dlss5",
+                "description": "Reconstruct skin, hair and fabric micro-detail in a video with NVIDIA DLSS 5 neural rendering, via a local ComfyUI. Upscale before this node: it gains ~2.1x detail at 4K against roughly parity at HD.",
+                "display_name": "DLSS 5 Enhance Video"
             }
         }
     ]
