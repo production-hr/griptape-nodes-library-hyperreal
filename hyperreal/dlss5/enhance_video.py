@@ -66,8 +66,9 @@ class Dlss5EnhanceVideo(ControlNode):
         not the neural pass, is the entire colour shift. At 0.0 it is colour
         neutral.
       * ``dlss_model_preset`` is **M**, which retains the most texture.
-      * ``upscaling_mode`` is **1x**. The other modes do nothing on the
-        community (RTX 40-series) runtime, which falls back to native.
+      * ``upscaling_mode`` is **1x**, which is right only when the input is
+        already at delivery resolution. See below - on an HD source, letting
+        DLSS do the upscale here is usually the better pipeline.
 
     Two things decide whether this pass helps at all, and neither is a setting:
 
@@ -75,14 +76,22 @@ class Dlss5EnhanceVideo(ControlNode):
         On fast motion set ``motion`` to ``none`` to limit the damage, or skip
         the pass entirely.
       * **Resolution.** At HD the result is roughly parity; at 4K it returns
-        ~2.1x the detail for ~1.46x the shimmer. Upscale *before* this node.
+        ~2.1x the detail for ~1.46x the shimmer. Feed it 4K one way or another.
+
+    On an HD source, ``2x (Performance)`` reconstructs and upscales in a single
+    pass and measured at 2.54x and 2.88x detail on two clips - as good as or
+    better than upscaling externally first, in one step instead of two. A model
+    upscaler in front can still win when it genuinely helps that clip (3.08x on
+    one of the two), but it is inconsistent, and DLSS's own upscale was the
+    steadier of the approaches. Measure per clip if it matters.
 
     Inputs:
         - video (VideoUrlArtifact | str): Source video, artifact or local path.
         - dlss_model_preset (str): Default, J, K, L or M.
         - local_tone_strength (float): 0.0 keeps colour neutral.
         - motion (str): auto, optical_flow or none.
-        - upscaling_mode (str): DLSS mode; 1x on 40-series.
+        - upscaling_mode (str): 1x for an input already at delivery resolution,
+          2x to upscale and reconstruct in one pass from HD.
         - codec / container / quality (str): Encoder settings for the output.
         - output_directory (str): Empty writes to ComfyUI's output folder.
 
@@ -147,7 +156,11 @@ class Dlss5EnhanceVideo(ControlNode):
                 name="upscaling_mode",
                 default_value=UPSCALING_MODES[0],
                 traits={Options(choices=UPSCALING_MODES)},
-                tooltip="Leave at 1x on RTX 40-series: the community runtime rejects the other modes.",
+                tooltip=(
+                    "1x when the input is already at delivery resolution. From an HD source, 2x "
+                    "upscales and reconstructs in one pass and measured as good as or better than "
+                    "upscaling externally first. Verified working on RTX 40-series."
+                ),
                 allowed_modes={ParameterMode.INPUT, ParameterMode.PROPERTY},
             )
         )

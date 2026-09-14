@@ -59,11 +59,23 @@ is to skip the pass.
 detail for ~1.46x the shimmer — measured at 2.15x and 2.17x on two unrelated clips, the most
 reproducible figure in the whole evaluation.
 
-So **put this node after your upscale, not before it**, and before frame interpolation — frame rate
+So **feed this node 4K**, one way or another, and run it before frame interpolation — frame rate
 barely affects the result (2.08x at 25 fps against 2.15x at 60 fps) and running at the lower rate
 costs 2.4x less.
 
-    generate HD -> upscale 4K -> DLSS 5 -> interpolate -> grade / stabilise -> deliver
+There are two ways to get to 4K, and DLSS can do it itself:
+
+    generate HD -> DLSS 5 at 2x -> interpolate -> grade / stabilise -> deliver     one step
+    generate HD -> upscale 4K -> DLSS 5 at 1x -> interpolate -> grade -> deliver   two steps
+
+From an HD source, `2x (Performance)` measured **2.54x and 2.88x** detail on two clips against a
+plain-lanczos 4K reference — as good as or better than upscaling externally first, in one step
+instead of two, at ~22 s for a 5 s clip.
+
+A model upscaler in front can still beat it when it genuinely helps that clip: on one of the two,
+Topaz-then-DLSS reached 3.08x while DLSS's own upscale got 2.54x. But on the other clip Topaz added
+almost nothing on its own (1.02x) and that path came last (2.12x). DLSS's own upscale was the
+steadier of the two approaches across both clips. Default to it; measure per clip when it matters.
 
 Also: **never chain this after a Deblur IC-LoRA pass.** On already-deblurred footage DLSS 5 removes
 53% of the detail that pass added. They undo each other; pick one.
@@ -78,7 +90,7 @@ Also: **never chain this after a Deblur IC-LoRA pass.** On already-deblurred foo
 | `dlss_model_preset` | str | `M` | Default, J, K, L, M. |
 | `local_tone_strength` | float | `0.0` | Leave it. See above. |
 | `motion` | str | `auto` | `auto`, `optical_flow` (identical to auto), `none`. |
-| `upscaling_mode` | str | `1x (DLAA / native)` | The other modes do nothing on 40-series — the signed runtime rejects the low-resolution colour contract and falls back to native. |
+| `upscaling_mode` | str | `1x (DLAA / native)` | `1x` when the input is already at delivery resolution. From an HD source, `2x` upscales and reconstructs in one pass — see below. Verified working on 40-series. |
 | `output_directory` | str | `""` | Absolute path, or empty for ComfyUI's output folder. |
 
 ### Encoding *(collapsed)*
