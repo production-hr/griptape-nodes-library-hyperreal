@@ -10,7 +10,7 @@ updated: 2026-09-18
 
 > lede: What the HyperReal node library is, how to install and configure it, and the conventions every node in it shares.
 
-Most of HyperReal's production pipeline runs through hosted services — HeyGen for lipsync, Topaz for upscaling, WaveSpeed for talking-head generation, Tavus for conversational replicas, RunComfy for ComfyUI workloads — plus a growing set of local video operations (tracking, cropping, compositing, matting, chunking) that would otherwise mean a round trip through an NLE for every iteration. The `griptape-nodes-library-hyperreal` repository packages all of it as a single [Griptape Nodes](https://www.griptapenodes.com/) library, so a workflow canvas can take a plate from ingest to delivery without leaving the engine. As of version 0.18.1 the library registers 28 nodes.
+Most of HyperReal's production pipeline runs through hosted services — HeyGen for lipsync, Topaz for upscaling, WaveSpeed for talking-head generation, Tavus for conversational replicas, RunComfy for ComfyUI workloads — plus a growing set of local video operations (tracking, cropping, compositing, matting, chunking) that would otherwise mean a round trip through an NLE for every iteration. The `griptape-nodes-library-hyperreal` repository packages all of it as a single [Griptape Nodes](https://www.griptapenodes.com/) library, so a workflow canvas can take a plate from ingest to delivery without leaving the engine. As of version 0.18.1 the library registers 29 nodes.
 
 ## 1. Installation
 
@@ -51,7 +51,7 @@ The library is organized into editor categories; each group has its own document
 | Category | Nodes | Documented in |
 |----------|-------|---------------|
 | HeyGen / WaveSpeed | Avatar Video, Video Translate, InfiniteTalk, InfiniteTalk V2V, Image Edit | Generation Services |
-| Topaz | Video Upscale, Image Upscale | Upscaling |
+| Topaz / DLSS 5 | Video Upscale, Image Upscale, DLSS 5 Enhance Video | Upscaling |
 | Face Prep | Detect Head Region, Crop To Region, Composite Region Back, Zoom To Head, Composite Face Back | Face Prep |
 | Figure Prep / ComfyUI | Detect Figure Track, Reposition Tracked Crop, RunComfy SCAIL Infinite | Figure Prep |
 | Composite / Matte | Composite Over Background, Composite Bottom Band, Overlay Zoomed Video, Extract Image Matte, Refine Video Matte | Compositing & Mattes |

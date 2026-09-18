@@ -1,15 +1,15 @@
 ---
-title: Topaz Upscaling Nodes
+title: Video and Image Enhancement
 section: Pipeline
 subsection: Griptape Nodes
 category: Upscaling
-excerpt: Topaz Labs video and image upscaling nodes, their models, limits, and gotchas.
+excerpt: Topaz upscaling and local DLSS 5 detail recovery nodes for the pipeline.
 tags: [ai, video, pipeline, workflow, reference]
 updated: 2026-09-18
 ---
-> lede: Two nodes wrap the Topaz Labs APIs — one upscales finished video, the other restores still images before a lipsync pass.
+> lede: Three nodes recover resolution and detail — hosted Topaz upscaling for video and stills, and a locally-run DLSS 5 neural detail pass.
 
-Generated video comes back at delivery-unfriendly resolutions, and head crops pulled out of full-body frames carry too few pixels for a lipsync model to animate cleanly; these two nodes fix both problems with Topaz Labs' hosted upscalers. They talk to two entirely separate API surfaces behind the same `TOPAZ_API_KEY` — the video node uses the express video flow, the image node the async image enhance flow — but share the library's standard plumbing: media inputs in any of the usual forms (bytes, URLs, data URIs, workspace paths, `{project_dir}` macros), HTTP 429 retried up to three additional times honoring `Retry-After` capped at 60 seconds, results downloaded immediately and re-hosted through the engine's static file store because Topaz's download links expire, and an optional `output_directory` file copy with collision suffixes. Both nodes report through the standard success/failure control outputs, so a missing key, an oversize input, or a failed Topaz job surfaces as a readable status message rather than a stack trace. The key is set under Settings, then API Keys and Secrets, and a newly added key requires an engine restart before the nodes can see it.
+Generated video comes back at delivery-unfriendly resolutions, and head crops pulled out of full-body frames carry too few pixels for a lipsync model to animate cleanly; the two Topaz nodes fix both problems with Topaz Labs' hosted upscalers, and a third node runs NVIDIA DLSS 5 neural rendering on the local GPU to reconstruct the micro-detail — skin, hair, fabric — that upscaling alone cannot invent. The Topaz pair talks to two entirely separate API surfaces behind the same `TOPAZ_API_KEY` — the video node uses the express video flow, the image node the async image enhance flow — but shares the library's standard plumbing: media inputs in any of the usual forms (bytes, URLs, data URIs, workspace paths, `{project_dir}` macros), HTTP 429 retried up to three additional times honoring `Retry-After` capped at 60 seconds, results downloaded immediately and re-hosted through the engine's static file store because Topaz's download links expire, and an optional `output_directory` file copy with collision suffixes. Both Topaz nodes report through the standard success/failure control outputs, so a missing key, an oversize input, or a failed Topaz job surfaces as a readable status message rather than a stack trace. The key is set under Settings, then API Keys and Secrets, and a newly added key requires an engine restart before the nodes can see it; the DLSS 5 node, running locally, needs no secret at all.
 
 ## 1. Topaz Video Upscale
 
@@ -52,3 +52,40 @@ Three limits are enforced before any upload: 500 MB per request, 512 megapixels 
 | output_directory | (empty) | Optional folder to also save the result into |
 
 Outputs: `upscaled_image` (the re-hosted result — feed this to the lipsync node), `process_id` (for chasing a job that timed out on our side), and `size_report` (JSON with source and output dimensions, the achieved scale factor, and the model and face-enhancement settings used). The status details additionally report the megapixel count the job was billed on and the aspect-ratio check described above.
+
+## 3. DLSS 5 Enhance Video
+
+Runs NVIDIA DLSS 5 neural rendering over a finished video to reconstruct the micro-detail AI generation is worst at — skin and hair texture rather than sharpening. Unlike everything else on this page, and unlike the library's other ComfyUI nodes, it executes on the local machine: the DLSS runtime drives the GPU directly through a native worker, so there is no hosted equivalent to call. The node wraps `DLSS5 Enhance Video File` from the `Blueforcer/ComfyUI-DLSS5-Enhancer` node pack and talks to a ComfyUI on `127.0.0.1`, probing port 8000 first (so an already-open ComfyUI Desktop is reused) and then 8188; an explicit `server_url` overrides the probe. Before submitting anything it checks that the ComfyUI actually has the node pack installed, failing with a message that names the fix (clone into `custom_nodes`, run `install_runtime.py`, restart ComfyUI). No API secret is involved, and the auto-start path detection targets Windows ComfyUI Desktop installs.
+
+> **Warning:** With `auto_start_server` on (the default), the node launches a detached headless ComfyUI on port 8188 when neither port answers, waiting up to 180 seconds for it to become ready (its log lands in the system temp directory). That process deliberately outlives the node and the workflow — later runs reuse it instead of paying the startup cost again — but nothing ever shuts it down for you. Close it yourself when you are done, or turn `auto_start_server` off and manage ComfyUI manually.
+
+The defaults are the ones that measured best on HyperReal footage, not the node pack's own. `local_tone_strength` is 0.0 rather than the pack's 1.0: at 1.0 the enhancer applies a local tone map that crushes highlights and desaturates by roughly 18 percent — that, not the neural pass, is the entire colour shift — while at 0.0 it is colour neutral. `dlss_model_preset` is M, which retains the most texture, and `upscaling_mode` stays at 1x because the other modes do nothing on the community RTX 40-series runtime, which falls back to native. Two things decide whether the pass helps at all, and neither is a setting. Motion: static and slow shots gain detail, fast-motion shots lose it — set `motion` to `none` there to limit the damage, or skip the pass entirely. Resolution: at HD the result is roughly parity, while at 4K it returns about 2.1x the detail for about 1.46x the shimmer, so upscale before this node, not after.
+
+Mechanically, a local source file is handed to ComfyUI by path and never passes through memory; URLs are streamed to a temp file first. The node polls ComfyUI's history every two seconds up to `timeout_seconds` (default 3600), and cancelling the workflow in the editor is handled cleanly — an interrupt is sent to ComfyUI and the node reports `cancelled`. `max_frames` renders a preview of that many frames instead of the whole clip, which is the cheap way to judge a shot before committing.
+
+| Parameter | Default | Purpose |
+|---|---|---|
+| video | — | Source video: artifact, URL, or a plain local path; upscale before this node |
+| dlss_model_preset | M | DLSS model: `Default`, `J`, `K`, `L`, `M`; M retains the most skin and hair texture |
+| local_tone_strength | 0.0 | Local tone mapping; keep at 0.0 for colour neutrality (see above) |
+| motion | auto | Temporal accumulation: `auto`, `optical_flow`, or `none`; use `none` on fast motion |
+| upscaling_mode | 1x (DLAA / native) | Leave at 1x on RTX 40-series; the community runtime rejects the other modes |
+| output_directory | (empty) | Absolute path to write into; empty writes to ComfyUI's output folder |
+| codec | H.264 | `H.264`, `HEVC`, `AV1`, or `ProRes Proxy`; H.264 and HEVC use NVENC with a software fallback |
+| container | MP4 | `MKV` stream-copies audio and subtitles; `MP4` and `MOV` re-encode audio to AAC |
+| quality | Good | `Max` is constant quality and very large (~8 MB per second); use it when measuring |
+| copy_audio | true | Mux the original audio into the result |
+| local_structure_strength | 1.5 | Detail reconstruction; measured effect between 1.5 and 2.0 is negligible |
+| skin_structure_strength | 2.0 | Skin and pore reconstruction; requires `automatic_mask` |
+| automatic_mask | true | Let the model detect skin regions; the gate for skin structure |
+| nr_style | Default | Look of the neural pass: `Default`, `Natural`, `Cinematic` |
+| nr_preset | Default | Measured to produce identical output at every value on current builds |
+| nr_intensity | 1.0 | Strength of the neural pass; above 1.0 has no further effect |
+| scene_change_threshold | 0.24 | Measured to make no difference between 0.24 and 0.90 |
+| max_frames | 0 | 0 renders the whole video; any other value renders a preview of that many frames |
+| server_url | (empty) | ComfyUI base URL; empty probes 127.0.0.1:8000 then :8188 |
+| auto_start_server | true | Launch a headless ComfyUI if none is reachable (see the warning above) |
+| comfy_python / comfy_main | (empty) | Auto-start executables; empty auto-detects the ComfyUI Desktop install |
+| timeout_seconds | 3600 | Maximum seconds to wait for the render |
+
+Outputs: `video_out` (the enhanced video, re-hosted through the static file store), `output_path` (the absolute path of the file DLSS 5 wrote, for a local next step), `frames` (frames processed), `status` (`completed`, or a `kind: detail` string on failure), and `was_successful`. This node does not use the standard success/failure control outputs the rest of the page's nodes share — it is a plain control node, and failures surface through `status` and `was_successful` instead.
